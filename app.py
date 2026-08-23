@@ -50,7 +50,7 @@ class WorkerThread(QThread):
     finished = pyqtSignal(bool, str) # Success, Message
     progress = pyqtSignal(str)
 
-    def __init__(self, input_path, output_path, bg_color, threshold, loop_count, replace_bg):
+    def __init__(self, input_path, output_path, bg_color, threshold, loop_count, replace_bg, pad_frames):
         super().__init__()
         self.input_path = input_path
         self.output_path = output_path
@@ -58,6 +58,7 @@ class WorkerThread(QThread):
         self.threshold = threshold
         self.loop_count = loop_count
         self.replace_bg = replace_bg
+        self.pad_frames = pad_frames
 
     def run(self):
         try:
@@ -69,7 +70,8 @@ class WorkerThread(QThread):
                 self.loop_count, 
                 replace_bg=self.replace_bg,
                 bg_color_hex=self.bg_color,
-                threshold=self.threshold
+                threshold=self.threshold,
+                pad_frames=self.pad_frames
             )
 
             self.finished.emit(True, f"Successfully saved to {self.output_path}")
@@ -131,6 +133,12 @@ class MainWindow(QMainWindow):
         self.loop_input.setSingleStep(0.1)
         form_layout.addRow("Loop Count:", self.loop_input)
 
+        self.pad_frames_input = QSpinBox()
+        self.pad_frames_input.setRange(0, 100)
+        self.pad_frames_input.setValue(0)
+        self.pad_frames_input.setToolTip("Add duplicate copies of the last frame to prevent skipping on some hardware.")
+        form_layout.addRow("Pad Last Frame (Count):", self.pad_frames_input)
+
         settings_group.setLayout(form_layout)
         main_layout.addWidget(settings_group)
 
@@ -175,9 +183,10 @@ class MainWindow(QMainWindow):
         bg_color = self.color_input.text()
         threshold = self.threshold_input.value()
         loop_count = self.loop_input.value()
+        pad_frames = self.pad_frames_input.value()
         replace_bg = self.replace_bg_check.isChecked()
 
-        self.thread = WorkerThread(self.current_file, output_path, bg_color, threshold, loop_count, replace_bg)
+        self.thread = WorkerThread(self.current_file, output_path, bg_color, threshold, loop_count, replace_bg, pad_frames)
         self.thread.finished.connect(self.on_finished)
         self.thread.progress.connect(self.update_status)
         
