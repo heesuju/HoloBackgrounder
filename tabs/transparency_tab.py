@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLa
                              QSlider, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
                              QFileDialog, QGroupBox, QFormLayout, QMessageBox, QColorDialog)
 from PyQt6.QtCore import Qt, QPointF
-from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QBrush
+from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QBrush, QKeySequence, QShortcut
 
 class ResizableGraphicsView(QGraphicsView):
     def resizeEvent(self, event):
@@ -44,6 +44,8 @@ class ImageScene(QGraphicsScene):
             self.last_point = pos
 
     def mouseReleaseEvent(self, event):
+        if self.is_drawing and not self.tab.spoit_active:
+            self.tab.save_state()
         self.is_drawing = False
 
 
@@ -59,6 +61,9 @@ class TransparencyTab(QWidget):
         self.target_color = np.array([0, 0, 0], dtype=np.uint8)
         self.threshold = 0
         self.spoit_active = False
+        
+        self.undo_stack = []
+        self.redo_stack = []
         
         self.init_ui()
 
@@ -136,6 +141,13 @@ class TransparencyTab(QWidget):
         self.view.setBackgroundBrush(QBrush(bg_pixmap))
         layout.addWidget(self.view)
 
+        # Shortcuts
+        self.undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self.undo_shortcut.activated.connect(self.undo)
+        
+        self.redo_shortcut = QShortcut(QKeySequence("Ctrl+Shift+Z"), self)
+        self.redo_shortcut.activated.connect(self.redo)
+
     def create_checkerboard_pattern(self):
         size = 20
         img = QImage(size * 2, size * 2, QImage.Format.Format_RGB32)
@@ -165,6 +177,9 @@ class TransparencyTab(QWidget):
                 self.eraser_mask_qimage = QImage(w, h, QImage.Format.Format_ARGB32)
                 self.eraser_mask_qimage.fill(Qt.GlobalColor.transparent)
                 
+                self.undo_stack = [self.eraser_mask_qimage.copy()]
+                self.redo_stack = []
+                
                 self.scene.setSceneRect(0, 0, w, h)
                 self.btn_save.setEnabled(True)
                 self.btn_clear.setEnabled(True)
@@ -181,6 +196,8 @@ class TransparencyTab(QWidget):
         self.original_np = None
         self.eraser_mask_qimage = None
         self.current_display_qimage = None
+        self.undo_stack = []
+        self.redo_stack = []
         self.pixmap_item.setPixmap(QPixmap())
         self.btn_save.setEnabled(False)
         self.btn_clear.setEnabled(False)
@@ -195,6 +212,26 @@ class TransparencyTab(QWidget):
     def on_threshold_changed(self, value):
         self.threshold = value
         self.update_display()
+
+    def save_state(self):
+        if self.eraser_mask_qimage is not None:
+            self.undo_stack.append(self.eraser_mask_qimage.copy())
+            if len(self.undo_stack) > 21: # max 20 undos
+                self.undo_stack.pop(0)
+            self.redo_stack.clear()
+
+    def undo(self):
+        if len(self.undo_stack) > 1:
+            self.redo_stack.append(self.undo_stack.pop())
+            self.eraser_mask_qimage = self.undo_stack[-1].copy()
+            self.update_display()
+
+    def redo(self):
+        if self.redo_stack:
+            state = self.redo_stack.pop()
+            self.undo_stack.append(state)
+            self.eraser_mask_qimage = state.copy()
+            self.update_display()
 
     def erase_at(self, p1, p2):
         if self.eraser_mask_qimage is None or self.current_display_qimage is None:
