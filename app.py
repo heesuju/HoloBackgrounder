@@ -84,17 +84,19 @@ class SplitImageWorkerThread(QThread):
     finished = pyqtSignal(bool, str)
     progress = pyqtSignal(str)
 
-    def __init__(self, input_path, output_dir, min_area, min_alpha):
+    def __init__(self, input_path, output_dir, min_area, min_alpha, override_name, start_index):
         super().__init__()
         self.input_path = input_path
         self.output_dir = output_dir
         self.min_area = min_area
         self.min_alpha = min_alpha
+        self.override_name = override_name
+        self.start_index = start_index
 
     def run(self):
         try:
             self.progress.emit("Splitting image...")
-            saved_files = split_image.split_and_save_shapes(self.input_path, self.output_dir, self.min_area, self.min_alpha)
+            saved_files = split_image.split_and_save_shapes(self.input_path, self.output_dir, self.min_area, self.min_alpha, self.override_name, self.start_index)
             self.finished.emit(True, f"Successfully extracted {len(saved_files)} shapes to {self.output_dir}")
         except Exception as e:
             self.finished.emit(False, str(e))
@@ -111,6 +113,24 @@ class MainWindow(QMainWindow):
         
         self.tabs = QTabWidget()
         main_layout.addWidget(self.tabs)
+        
+        # Common Output Section
+        common_group = QGroupBox("Common Output Settings")
+        common_layout = QFormLayout()
+
+        self.override_name_input = QLineEdit("")
+        self.override_name_input.setPlaceholderText("Optional: e.g., 'icon' or 'video_name'")
+        self.override_name_input.setToolTip("Overrides the base filename for both MP4 saving and Image Splitting.")
+        common_layout.addRow("Override Base Name:", self.override_name_input)
+
+        self.start_index_input = QSpinBox()
+        self.start_index_input.setRange(0, 100000)
+        self.start_index_input.setValue(1)
+        self.start_index_input.setToolTip("Starting index for Image Splitting output (e.g. part_1, part_2).")
+        common_layout.addRow("Start Index (Splitter):", self.start_index_input)
+
+        common_group.setLayout(common_layout)
+        main_layout.addWidget(common_group)
         
         self.init_gif_tab()
         self.init_split_tab()
@@ -267,7 +287,14 @@ class MainWindow(QMainWindow):
         if not self.current_file:
             return
 
-        output_path, _ = QFileDialog.getSaveFileName(self, "Save MP4", "", "MP4 Files (*.mp4)")
+        default_name = self.override_name_input.text().strip()
+        if default_name:
+            if not default_name.lower().endswith('.mp4'):
+                default_name += ".mp4"
+        else:
+            default_name = ""
+
+        output_path, _ = QFileDialog.getSaveFileName(self, "Save MP4", default_name, "MP4 Files (*.mp4)")
         if not output_path:
             return
 
@@ -324,8 +351,10 @@ class MainWindow(QMainWindow):
 
         min_area = self.split_min_area_input.value()
         min_alpha = self.split_min_alpha_input.value()
+        override_name = self.override_name_input.text()
+        start_index = self.start_index_input.value()
 
-        self.split_thread = SplitImageWorkerThread(self.split_current_file, output_dir, min_area, min_alpha)
+        self.split_thread = SplitImageWorkerThread(self.split_current_file, output_dir, min_area, min_alpha, override_name, start_index)
         self.split_thread.finished.connect(self.on_split_finished)
         self.split_thread.progress.connect(self.update_split_status)
         

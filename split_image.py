@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import os
 
-def split_and_save_shapes(input_path, output_dir=None, min_area=50, min_alpha=10):
+def split_and_save_shapes(input_path, output_dir=None, min_area=50, min_alpha=10, override_name=None, start_index=1):
     """
     Reads an image with an alpha channel, identifies disconnected shapes
     based on the alpha channel, and saves each shape as a separate tightly-cropped PNG.
@@ -29,10 +29,14 @@ def split_and_save_shapes(input_path, output_dir=None, min_area=50, min_alpha=10
     # Find connected components
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary_mask, connectivity=8)
     
-    base_name = os.path.splitext(os.path.basename(input_path))[0]
+    if override_name and override_name.strip():
+        base_name = override_name.strip()
+    else:
+        base_name = os.path.splitext(os.path.basename(input_path))[0]
     
     saved_files = []
     
+    shape_count = 0
     # label 0 is the background
     for i in range(1, num_labels):
         x = stats[i, cv2.CC_STAT_LEFT]
@@ -56,10 +60,11 @@ def split_and_save_shapes(input_path, output_dir=None, min_area=50, min_alpha=10
         # This ensures overlapping bounding boxes from other shapes are masked out
         cropped_img[:, :, 3] = cv2.bitwise_and(cropped_img[:, :, 3], cropped_mask)
         
-        output_filename = f"{base_name}_part_{i}.png"
+        output_filename = f"{base_name}_part_{start_index + shape_count}.png"
         output_path = os.path.join(output_dir, output_filename)
         
         cv2.imwrite(output_path, cropped_img)
         saved_files.append(output_path)
+        shape_count += 1
         
     return saved_files
