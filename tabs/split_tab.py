@@ -35,23 +35,11 @@ class SplitTab(QWidget):
         
         layout.addStretch()
 
-        # 3. Action Section
-        self.split_process_btn = QPushButton("Process and Extract Shapes")
-        self.split_process_btn.setFixedHeight(40)
-        self.split_process_btn.setStyleSheet("font-weight: bold; font-size: 14px;")
-        self.split_process_btn.clicked.connect(self.process_split_file)
-        self.split_process_btn.setEnabled(False)
-        layout.addWidget(self.split_process_btn)
-
-        self.split_status_label = QLabel("")
-        self.split_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.split_status_label)
-
         self.split_current_file = None
 
     def on_global_files_changed(self):
         valid_file = self.get_valid_file()
-        self.split_process_btn.setEnabled(bool(valid_file))
+        self.main_window.set_export_enabled(bool(valid_file))
 
     def get_valid_file(self):
         for f in self.main_window.current_files:
@@ -59,7 +47,7 @@ class SplitTab(QWidget):
                 return f
         return None
 
-    def process_split_file(self):
+    def export(self):
         current_file = self.get_valid_file()
         if not current_file:
             return
@@ -77,16 +65,16 @@ class SplitTab(QWidget):
         self.split_thread.finished.connect(self.on_split_finished)
         self.split_thread.progress.connect(self.update_split_status)
         
-        self.split_process_btn.setEnabled(False)
-        self.split_status_label.setText("Starting...")
+        self.main_window.set_export_enabled(False)
+        self.main_window.set_status("Starting...")
         self.split_thread.start()
 
     def update_split_status(self, message):
-        self.split_status_label.setText(message)
+        self.main_window.set_status(message)
 
     def on_split_finished(self, success, message):
-        self.split_process_btn.setEnabled(True)
-        self.split_status_label.setText(message)
+        self.main_window.set_export_enabled(True)
+        self.main_window.set_status(message)
         
         if success:
             QMessageBox.information(self, "Success", "Processing complete!\n" + message)

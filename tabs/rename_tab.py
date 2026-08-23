@@ -16,25 +16,13 @@ class RenameTab(QWidget):
         
         layout.addStretch()
 
-        # 3. Action Section
-        self.rename_process_btn = QPushButton("Batch Rename Files")
-        self.rename_process_btn.setFixedHeight(40)
-        self.rename_process_btn.setStyleSheet("font-weight: bold; font-size: 14px;")
-        self.rename_process_btn.clicked.connect(self.process_rename_files)
-        self.rename_process_btn.setEnabled(False)
-        layout.addWidget(self.rename_process_btn)
-
-        self.rename_status_label = QLabel("")
-        self.rename_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.rename_status_label)
-
         self.rename_current_files = []
 
     def on_global_files_changed(self):
         self.rename_current_files = self.main_window.current_files
-        self.rename_process_btn.setEnabled(bool(self.rename_current_files))
+        self.main_window.set_export_enabled(bool(self.rename_current_files))
 
-    def process_rename_files(self):
+    def export(self):
         if not self.rename_current_files:
             return
 
@@ -45,16 +33,16 @@ class RenameTab(QWidget):
         self.rename_thread.finished.connect(self.on_rename_finished)
         self.rename_thread.progress.connect(self.update_rename_status)
         
-        self.rename_process_btn.setEnabled(False)
-        self.rename_status_label.setText("Starting...")
+        self.main_window.set_export_enabled(False)
+        self.main_window.set_status("Starting...")
         self.rename_thread.start()
 
     def update_rename_status(self, message):
-        self.rename_status_label.setText(message)
+        self.main_window.set_status(message)
 
     def on_rename_finished(self, success, message):
-        self.rename_process_btn.setEnabled(True)
-        self.rename_status_label.setText(message)
+        self.main_window.set_export_enabled(True)
+        self.main_window.set_status(message)
         
         if success:
             QMessageBox.information(self, "Success", "Processing complete!\n" + message)

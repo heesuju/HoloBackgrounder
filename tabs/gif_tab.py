@@ -48,23 +48,11 @@ class GifTab(QWidget):
         settings_group.setLayout(form_layout)
         layout.addWidget(settings_group)
 
-        # 3. Action Section
-        self.process_btn = QPushButton("Process and Save As MP4")
-        self.process_btn.setFixedHeight(40)
-        self.process_btn.setStyleSheet("font-weight: bold; font-size: 14px;")
-        self.process_btn.clicked.connect(self.process_file)
-        self.process_btn.setEnabled(False)
-        layout.addWidget(self.process_btn)
-
-        self.status_label = QLabel("")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.status_label)
-
         self.current_file = None
 
     def on_global_files_changed(self):
         valid_file = self.get_valid_file()
-        self.process_btn.setEnabled(bool(valid_file))
+        self.main_window.set_export_enabled(bool(valid_file))
 
     def get_valid_file(self):
         for f in self.main_window.current_files:
@@ -76,7 +64,7 @@ class GifTab(QWidget):
         self.color_input.setEnabled(checked)
         self.threshold_input.setEnabled(checked)
 
-    def process_file(self):
+    def export(self):
         current_file = self.get_valid_file()
         if not current_file:
             return
@@ -102,18 +90,18 @@ class GifTab(QWidget):
         self.thread.finished.connect(self.on_finished)
         self.thread.progress.connect(self.update_status)
         
-        self.process_btn.setEnabled(False)
+        self.main_window.set_export_enabled(False)
         self.replace_bg_check.setEnabled(False)
-        self.status_label.setText("Starting...")
+        self.main_window.set_status("Starting...")
         self.thread.start()
 
     def update_status(self, message):
-        self.status_label.setText(message)
+        self.main_window.set_status(message)
 
     def on_finished(self, success, message):
-        self.process_btn.setEnabled(True)
+        self.main_window.set_export_enabled(True)
         self.replace_bg_check.setEnabled(True)
-        self.status_label.setText(message)
+        self.main_window.set_status(message)
         
         if success:
             QMessageBox.information(self, "Success", "Processing complete!\n" + message)

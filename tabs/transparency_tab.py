@@ -73,11 +73,6 @@ class TransparencyTab(QWidget):
         # Toolbar
         toolbar_layout = QHBoxLayout()
         
-        self.btn_save = QPushButton("Save Image")
-        self.btn_save.clicked.connect(self.save_image)
-        self.btn_save.setEnabled(False)
-        toolbar_layout.addWidget(self.btn_save)
-        
         self.btn_reset = QPushButton("Reset Eraser")
         self.btn_reset.clicked.connect(self.reset_eraser)
         self.btn_reset.setEnabled(False)
@@ -189,7 +184,7 @@ class TransparencyTab(QWidget):
                 self.redo_stack = []
                 
                 self.scene.setSceneRect(0, 0, w, h)
-                self.btn_save.setEnabled(True)
+                self.main_window.set_export_enabled(True)
                 self.btn_reset.setEnabled(True)
                 self.threshold_slider.setValue(0)
                 self.spoit_active = False
@@ -216,7 +211,7 @@ class TransparencyTab(QWidget):
         self.undo_stack = []
         self.redo_stack = []
         self.pixmap_item.setPixmap(QPixmap())
-        self.btn_save.setEnabled(False)
+        self.main_window.set_export_enabled(False)
         self.btn_reset.setEnabled(False)
         self.scene.setSceneRect(0, 0, 0, 0)
         self.color_indicator.setStyleSheet("background-color: rgb(0, 0, 0); border: 1px solid black;")
@@ -310,7 +305,7 @@ class TransparencyTab(QWidget):
             
         self.pixmap_item.setPixmap(QPixmap.fromImage(self.current_display_qimage))
 
-    def save_image(self):
+    def export(self):
         if self.current_display_qimage is None:
             return
             

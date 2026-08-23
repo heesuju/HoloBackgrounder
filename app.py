@@ -2,7 +2,7 @@ import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QGroupBox, 
                              QFormLayout, QLineEdit, QSpinBox, QTabWidget, QHBoxLayout, 
                              QPushButton, QLabel, QFileDialog)
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 
 from components import MultiDragDropLabel
 from tabs.gif_tab import GifTab
@@ -11,13 +11,10 @@ from tabs.rename_tab import RenameTab
 from tabs.transparency_tab import TransparencyTab
 
 class MainWindow(QMainWindow):
-    # Custom signal if we need it, though direct method calling is also fine
-    # We will just call a method on the active tab, or all tabs.
-    
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Media Processor")
-        self.setGeometry(100, 100, 600, 700)
+        self.setGeometry(100, 100, 600, 750)
         
         self.current_files = []
 
@@ -75,6 +72,18 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self.on_tab_changed)
         main_layout.addWidget(self.tabs)
         
+        # 4. Global Export Section
+        self.export_btn = QPushButton("Export")
+        self.export_btn.setFixedHeight(45)
+        self.export_btn.setStyleSheet("font-weight: bold; font-size: 16px;")
+        self.export_btn.clicked.connect(self.on_export_clicked)
+        self.export_btn.setEnabled(False)
+        main_layout.addWidget(self.export_btn)
+
+        self.global_status_label = QLabel("")
+        self.global_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(self.global_status_label)
+        
         self.init_tabs()
 
     def init_tabs(self):
@@ -128,6 +137,17 @@ class MainWindow(QMainWindow):
         current_widget = self.tabs.currentWidget()
         if hasattr(current_widget, 'on_global_files_changed'):
             current_widget.on_global_files_changed()
+            
+    def on_export_clicked(self):
+        current_widget = self.tabs.currentWidget()
+        if hasattr(current_widget, 'export'):
+            current_widget.export()
+
+    def set_export_enabled(self, enabled):
+        self.export_btn.setEnabled(enabled)
+
+    def set_status(self, message):
+        self.global_status_label.setText(message)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
