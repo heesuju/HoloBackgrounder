@@ -4,7 +4,8 @@ import numpy as np
 from PIL import Image
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
                              QSlider, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
-                             QFileDialog, QGroupBox, QFormLayout, QMessageBox, QColorDialog)
+                             QFileDialog, QGroupBox, QFormLayout, QMessageBox, QColorDialog,
+                             QApplication)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage, QPixmap, QColor, QBrush, QPainter
 
@@ -20,6 +21,8 @@ class OutlineTab(QWidget):
         self.main_window = main_window
         
         self.original_np = None # original RGBA array
+        self.preview_np = None
+        self.scale_factor = 1.0
         self.current_display_qimage = None
         
         self.outline_color = np.array([255, 255, 255], dtype=np.uint8)
@@ -35,37 +38,56 @@ class OutlineTab(QWidget):
         controls_group = QGroupBox("Outline Settings")
         controls_layout = QHBoxLayout()
         
-        # Tools
-        tools_layout = QVBoxLayout()
-        self.btn_color = QPushButton("Choose Outline Color")
-        self.btn_color.clicked.connect(self.choose_color)
-        tools_layout.addWidget(self.btn_color)
-        controls_layout.addLayout(tools_layout)
-
         # Sliders and Pickers
         sliders_layout = QFormLayout()
         
-        # Color indicator
-        self.color_indicator = QLabel()
+        # Color indicator (clickable)
+        self.color_indicator = QPushButton()
         self.color_indicator.setFixedSize(30, 30)
         self.color_indicator.setStyleSheet(f"background-color: rgb(255, 255, 255); border: 1px solid black;")
+        self.color_indicator.clicked.connect(self.choose_color)
         
         color_btn_layout = QHBoxLayout()
         color_btn_layout.addWidget(self.color_indicator)
         color_btn_layout.addStretch()
-        sliders_layout.addRow("Current Color:", color_btn_layout)
+        sliders_layout.addRow("Outline Color:", color_btn_layout)
 
+        # Thickness
+        thickness_layout = QHBoxLayout()
+        from PyQt6.QtWidgets import QSpinBox
+        self.thickness_spin = QSpinBox()
+        self.thickness_spin.setRange(0, 100)
+        self.thickness_spin.setValue(self.thickness)
+        
         self.thickness_slider = QSlider(Qt.Orientation.Horizontal)
         self.thickness_slider.setRange(0, 100)
         self.thickness_slider.setValue(self.thickness)
+        
+        self.thickness_spin.valueChanged.connect(self.thickness_slider.setValue)
+        self.thickness_slider.valueChanged.connect(self.thickness_spin.setValue)
         self.thickness_slider.valueChanged.connect(self.on_thickness_changed)
-        sliders_layout.addRow("Thickness:", self.thickness_slider)
+        
+        thickness_layout.addWidget(self.thickness_spin)
+        thickness_layout.addWidget(self.thickness_slider)
+        sliders_layout.addRow("Thickness:", thickness_layout)
 
+        # Softness
+        softness_layout = QHBoxLayout()
+        self.softness_spin = QSpinBox()
+        self.softness_spin.setRange(0, 100)
+        self.softness_spin.setValue(self.softness)
+        
         self.softness_slider = QSlider(Qt.Orientation.Horizontal)
         self.softness_slider.setRange(0, 100)
         self.softness_slider.setValue(self.softness)
+        
+        self.softness_spin.valueChanged.connect(self.softness_slider.setValue)
+        self.softness_slider.valueChanged.connect(self.softness_spin.setValue)
         self.softness_slider.valueChanged.connect(self.on_softness_changed)
-        sliders_layout.addRow("Softness (Gradient):", self.softness_slider)
+        
+        softness_layout.addWidget(self.softness_spin)
+        softness_layout.addWidget(self.softness_slider)
+        sliders_layout.addRow("Softness (Gradient):", softness_layout)
         
         controls_layout.addLayout(sliders_layout)
         controls_group.setLayout(controls_layout)
@@ -115,7 +137,19 @@ class OutlineTab(QWidget):
                 self.original_np = np.array(img) # Shape: (H, W, 4)
                 
                 h, w = self.original_np.shape[:2]
-                self.scene.setSceneRect(0, 0, w, h)
+                
+                # Create a downscaled proxy for fast preview
+                max_dim = 800.0
+                if max(h, w) > max_dim:
+                    self.scale_factor = max_dim / max(h, w)
+                    new_w = int(w * self.scale_factor)
+                    new_h = int(h * self.scale_factor)
+                    self.preview_np = cv2.resize(self.original_np, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                else:
+                    self.scale_factor = 1.0
+                    self.preview_np = self.original_np.copy()
+                
+                self.scene.setSceneRect(0, 0, self.preview_np.shape[1], self.preview_np.shape[0])
                 self.main_window.set_export_enabled(True)
                 
                 self.update_display()
@@ -125,6 +159,7 @@ class OutlineTab(QWidget):
 
     def clear_image(self):
         self.original_np = None
+        self.preview_np = None
         self.current_display_qimage = None
         self.pixmap_item.setPixmap(QPixmap())
         self.main_window.set_export_enabled(False)
@@ -146,23 +181,38 @@ class OutlineTab(QWidget):
         self.update_display()
 
     def update_display(self):
-        if self.original_np is None:
+        if self.preview_np is None:
             return
             
-        img_np = self.original_np.copy()
+        scaled_thickness = int(self.thickness * self.scale_factor)
+        scaled_softness = int(self.softness * self.scale_factor)
+        
+        result_np = self.process_image(self.preview_np, scaled_thickness, scaled_softness)
+        
+        h, w, ch = result_np.shape
+        bytes_per_line = ch * w
+        
+        # We must keep a reference to current_np so the memory is not garbage collected
+        qimg = QImage(result_np.data, w, h, bytes_per_line, QImage.Format.Format_RGBA8888)
+        self.current_display_qimage = qimg.copy()
+            
+        self.pixmap_item.setPixmap(QPixmap.fromImage(self.current_display_qimage))
+
+    def process_image(self, img_np_source, thickness_val, softness_val):
+        img_np = img_np_source.copy()
         alpha = img_np[:, :, 3]
         
         # 1. Dilation (Thickness)
-        if self.thickness > 0:
-            ksize = 2 * self.thickness + 1
+        if thickness_val > 0:
+            ksize = 2 * thickness_val + 1
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
             outline_alpha = cv2.dilate(alpha, kernel, iterations=1)
         else:
             outline_alpha = alpha.copy()
             
         # 2. Softness (Gradient)
-        if self.softness > 0:
-            ksize = 2 * self.softness + 1
+        if softness_val > 0:
+            ksize = 2 * softness_val + 1
             outline_alpha = cv2.GaussianBlur(outline_alpha, (ksize, ksize), 0)
             
         # Composite: Original image OVER the generated outline
@@ -191,17 +241,10 @@ class OutlineTab(QWidget):
         result_np[..., :3] = (out_rgb * 255).astype(np.uint8)
         result_np[..., 3] = (out_a[..., 0] * 255).astype(np.uint8)
 
-        h, w, ch = result_np.shape
-        bytes_per_line = ch * w
-        
-        # We must keep a reference to current_np so the memory is not garbage collected
-        qimg = QImage(result_np.data, w, h, bytes_per_line, QImage.Format.Format_RGBA8888)
-        self.current_display_qimage = qimg.copy()
-            
-        self.pixmap_item.setPixmap(QPixmap.fromImage(self.current_display_qimage))
+        return result_np
 
     def export(self):
-        if self.current_display_qimage is None:
+        if self.original_np is None:
             return
             
         base_name = self.main_window.override_name_input.text().strip()
@@ -210,6 +253,12 @@ class OutlineTab(QWidget):
         
         file_path, _ = QFileDialog.getSaveFileName(self, "Save Image", default_name, "PNG Images (*.png)")
         if file_path:
-            self.current_display_qimage.save(file_path, "PNG")
+            self.main_window.set_status("Processing full resolution image...")
+            QApplication.processEvents() # Force UI update
+            
+            full_res_np = self.process_image(self.original_np, self.thickness, self.softness)
+            full_img = Image.fromarray(full_res_np, 'RGBA')
+            full_img.save(file_path, "PNG")
+            
             self.main_window.set_status(f"Saved to {file_path}")
             QMessageBox.information(self, "Success", f"Saved to {file_path}")
