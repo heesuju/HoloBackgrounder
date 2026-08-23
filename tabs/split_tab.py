@@ -12,32 +12,7 @@ class SplitTab(QWidget):
     def init_ui(self):
         layout = QVBoxLayout(self)
 
-        # 1. Input File Section
-        input_group = QGroupBox("Input PNG/WEBP Image")
-        input_layout = QVBoxLayout()
-        
-        self.split_drop_label = DragDropLabel(text="Drag and Drop PNG/WEBP file here\nor\nClick 'Browse' to select", file_types=['.png', '.webp'])
-        self.split_drop_label.fileDropped.connect(self.on_split_file_dropped)
-        input_layout.addWidget(self.split_drop_label)
-
-        btn_layout = QHBoxLayout()
-        browse_btn = QPushButton("Browse")
-        browse_btn.clicked.connect(self.browse_split_file)
-        btn_layout.addWidget(browse_btn)
-        
-        self.split_clear_btn = QPushButton("Clear")
-        self.split_clear_btn.clicked.connect(self.clear_split_file)
-        self.split_clear_btn.setEnabled(False)
-        btn_layout.addWidget(self.split_clear_btn)
-        
-        input_layout.addLayout(btn_layout)
-        
-        self.split_file_path_label = QLabel("No file selected")
-        self.split_file_path_label.setWordWrap(True)
-        input_layout.addWidget(self.split_file_path_label)
-        
-        input_group.setLayout(input_layout)
-        layout.addWidget(input_group)
+        # Settings Section
         
         # 2. Settings Section
         split_settings_group = QGroupBox("Settings")
@@ -74,41 +49,19 @@ class SplitTab(QWidget):
 
         self.split_current_file = None
 
-    def on_split_file_dropped(self, file_path):
-        self.split_current_file = file_path
-        self.split_file_path_label.setText(f"Selected: {file_path}")
-        self.split_process_btn.setEnabled(True)
-        self.split_clear_btn.setEnabled(True)
-        self.split_drop_label.setText("File Selected")
-        self.split_drop_label.setStyleSheet("border-color: #55cc55; background-color: #e0ffe0; color: #005500; border-style: solid;")
+    def on_global_files_changed(self):
+        valid_file = self.get_valid_file()
+        self.split_process_btn.setEnabled(bool(valid_file))
 
-    def clear_split_file(self):
-        self.split_current_file = None
-        self.split_file_path_label.setText("No file selected")
-        self.split_process_btn.setEnabled(False)
-        self.split_clear_btn.setEnabled(False)
-        self.split_drop_label.setText("Drag and Drop PNG/WEBP file here\nor\nClick 'Browse' to select")
-        self.split_drop_label.setStyleSheet("""
-            QLabel {
-                border: 2px dashed #aaa;
-                border-radius: 10px;
-                padding: 20px;
-                background-color: #f0f0f0;
-                color: #555;
-            }
-            QLabel:hover {
-                border-color: #55aaff;
-                background-color: #e0f0ff;
-            }
-        """)
-
-    def browse_split_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select File", "", "Image Files (*.png *.webp);;PNG Files (*.png);;WEBP Files (*.webp)")
-        if file_path:
-            self.on_split_file_dropped(file_path)
+    def get_valid_file(self):
+        for f in self.main_window.current_files:
+            if f.lower().endswith(('.png', '.webp')):
+                return f
+        return None
 
     def process_split_file(self):
-        if not self.split_current_file:
+        current_file = self.get_valid_file()
+        if not current_file:
             return
 
         output_dir = QFileDialog.getExistingDirectory(self, "Select Output Directory")
@@ -120,12 +73,11 @@ class SplitTab(QWidget):
         override_name = self.main_window.override_name_input.text()
         start_index = self.main_window.start_index_input.value()
 
-        self.split_thread = SplitImageWorkerThread(self.split_current_file, output_dir, min_area, min_alpha, override_name, start_index)
+        self.split_thread = SplitImageWorkerThread(current_file, output_dir, min_area, min_alpha, override_name, start_index)
         self.split_thread.finished.connect(self.on_split_finished)
         self.split_thread.progress.connect(self.update_split_status)
         
         self.split_process_btn.setEnabled(False)
-        self.split_drop_label.setEnabled(False)
         self.split_status_label.setText("Starting...")
         self.split_thread.start()
 
@@ -134,7 +86,6 @@ class SplitTab(QWidget):
 
     def on_split_finished(self, success, message):
         self.split_process_btn.setEnabled(True)
-        self.split_drop_label.setEnabled(True)
         self.split_status_label.setText(message)
         
         if success:

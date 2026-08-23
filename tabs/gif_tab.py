@@ -12,24 +12,7 @@ class GifTab(QWidget):
     def init_ui(self):
         layout = QVBoxLayout(self)
 
-        # 1. Input File Section
-        input_group = QGroupBox("Input GIF/WEBM")
-        input_layout = QVBoxLayout()
-        
-        self.drop_label = DragDropLabel(file_types=['.gif', '.webm'])
-        self.drop_label.fileDropped.connect(self.on_file_dropped)
-        input_layout.addWidget(self.drop_label)
-
-        browse_btn = QPushButton("Browse")
-        browse_btn.clicked.connect(self.browse_file)
-        input_layout.addWidget(browse_btn)
-        
-        self.file_path_label = QLabel("No file selected")
-        self.file_path_label.setWordWrap(True)
-        input_layout.addWidget(self.file_path_label)
-        
-        input_group.setLayout(input_layout)
-        layout.addWidget(input_group)
+        # Settings Section
 
         # 2. Settings Section
         settings_group = QGroupBox("Settings")
@@ -79,24 +62,23 @@ class GifTab(QWidget):
 
         self.current_file = None
 
-    def on_file_dropped(self, file_path):
-        self.current_file = file_path
-        self.file_path_label.setText(f"Selected: {file_path}")
-        self.process_btn.setEnabled(True)
-        self.drop_label.setText("File Selected")
-        self.drop_label.setStyleSheet("border-color: #55cc55; background-color: #e0ffe0; color: #005500; border-style: solid;")
+    def on_global_files_changed(self):
+        valid_file = self.get_valid_file()
+        self.process_btn.setEnabled(bool(valid_file))
 
-    def browse_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select File", "", "GIF/WEBM Files (*.gif *.webm);;GIF Files (*.gif);;WEBM Files (*.webm)")
-        if file_path:
-            self.on_file_dropped(file_path)
+    def get_valid_file(self):
+        for f in self.main_window.current_files:
+            if f.lower().endswith(('.gif', '.webm')):
+                return f
+        return None
 
     def toggle_bg_inputs(self, checked):
         self.color_input.setEnabled(checked)
         self.threshold_input.setEnabled(checked)
 
     def process_file(self):
-        if not self.current_file:
+        current_file = self.get_valid_file()
+        if not current_file:
             return
 
         default_name = self.main_window.override_name_input.text().strip()
@@ -116,12 +98,11 @@ class GifTab(QWidget):
         pad_frames = self.pad_frames_input.value()
         replace_bg = self.replace_bg_check.isChecked()
 
-        self.thread = WorkerThread(self.current_file, output_path, bg_color, threshold, loop_count, replace_bg, pad_frames)
+        self.thread = WorkerThread(current_file, output_path, bg_color, threshold, loop_count, replace_bg, pad_frames)
         self.thread.finished.connect(self.on_finished)
         self.thread.progress.connect(self.update_status)
         
         self.process_btn.setEnabled(False)
-        self.drop_label.setEnabled(False)
         self.replace_bg_check.setEnabled(False)
         self.status_label.setText("Starting...")
         self.thread.start()
@@ -131,7 +112,6 @@ class GifTab(QWidget):
 
     def on_finished(self, success, message):
         self.process_btn.setEnabled(True)
-        self.drop_label.setEnabled(True)
         self.replace_bg_check.setEnabled(True)
         self.status_label.setText(message)
         

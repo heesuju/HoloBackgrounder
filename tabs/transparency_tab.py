@@ -73,20 +73,16 @@ class TransparencyTab(QWidget):
         # Toolbar
         toolbar_layout = QHBoxLayout()
         
-        self.btn_load = QPushButton("Load Image")
-        self.btn_load.clicked.connect(self.load_image)
-        toolbar_layout.addWidget(self.btn_load)
-        
         self.btn_save = QPushButton("Save Image")
         self.btn_save.clicked.connect(self.save_image)
         self.btn_save.setEnabled(False)
         toolbar_layout.addWidget(self.btn_save)
-
-        self.btn_clear = QPushButton("Clear Output/Reset")
-        self.btn_clear.clicked.connect(self.clear_image)
-        self.btn_clear.setEnabled(False)
-        toolbar_layout.addWidget(self.btn_clear)
         
+        self.btn_reset = QPushButton("Reset Eraser")
+        self.btn_reset.clicked.connect(self.reset_eraser)
+        self.btn_reset.setEnabled(False)
+        toolbar_layout.addWidget(self.btn_reset)
+
         toolbar_layout.addStretch()
         layout.addLayout(toolbar_layout)
 
@@ -163,8 +159,20 @@ class TransparencyTab(QWidget):
         self.spoit_active = True
         self.view.setCursor(Qt.CursorShape.CrossCursor)
 
-    def load_image(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
+    def on_global_files_changed(self):
+        valid_file = self.get_valid_file()
+        if valid_file:
+            self.load_image_from_path(valid_file)
+        else:
+            self.clear_image()
+
+    def get_valid_file(self):
+        for f in self.main_window.current_files:
+            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.webp')):
+                return f
+        return None
+
+    def load_image_from_path(self, file_path):
         if file_path:
             try:
                 # Load with PIL and convert to RGBA
@@ -182,7 +190,7 @@ class TransparencyTab(QWidget):
                 
                 self.scene.setSceneRect(0, 0, w, h)
                 self.btn_save.setEnabled(True)
-                self.btn_clear.setEnabled(True)
+                self.btn_reset.setEnabled(True)
                 self.threshold_slider.setValue(0)
                 self.spoit_active = False
                 self.view.setCursor(Qt.CursorShape.ArrowCursor)
@@ -192,6 +200,15 @@ class TransparencyTab(QWidget):
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to load image: {e}")
 
+    def reset_eraser(self):
+        if self.original_np is not None:
+            h, w = self.original_np.shape[:2]
+            self.eraser_mask_qimage = QImage(w, h, QImage.Format.Format_ARGB32)
+            self.eraser_mask_qimage.fill(Qt.GlobalColor.transparent)
+            self.undo_stack = [self.eraser_mask_qimage.copy()]
+            self.redo_stack = []
+            self.update_display()
+
     def clear_image(self):
         self.original_np = None
         self.eraser_mask_qimage = None
@@ -200,7 +217,7 @@ class TransparencyTab(QWidget):
         self.redo_stack = []
         self.pixmap_item.setPixmap(QPixmap())
         self.btn_save.setEnabled(False)
-        self.btn_clear.setEnabled(False)
+        self.btn_reset.setEnabled(False)
         self.scene.setSceneRect(0, 0, 0, 0)
         self.color_indicator.setStyleSheet("background-color: rgb(0, 0, 0); border: 1px solid black;")
 
