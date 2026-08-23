@@ -4,19 +4,21 @@ import tempfile
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                              QFileDialog, QSpinBox, QDoubleSpinBox, QMessageBox,
-                             QGroupBox, QFormLayout, QCheckBox)
+                             QGroupBox, QFormLayout, QCheckBox, QTabWidget)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QMimeData
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 
 import change_bg
 import gif_to_mp4
+import split_image
 
 class DragDropLabel(QLabel):
     fileDropped = pyqtSignal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, text="Drag and Drop file here\nor\nClick 'Browse' to select", file_types=None, parent=None):
         super().__init__(parent)
-        self.setText("Drag and Drop GIF/WEBM file here\nor\nClick 'Browse' to select")
+        self.setText(text)
+        self.file_types = file_types or ['.gif', '.webm']
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("""
             QLabel {
@@ -36,14 +38,16 @@ class DragDropLabel(QLabel):
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
-            if urls and (urls[0].toLocalFile().lower().endswith('.gif') or urls[0].toLocalFile().lower().endswith('.webm')):
-                event.acceptProposedAction()
+            if urls:
+                file_path = urls[0].toLocalFile().lower()
+                if any(file_path.endswith(ext) for ext in self.file_types):
+                    event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent):
         urls = event.mimeData().urls()
         if urls:
             file_path = urls[0].toLocalFile()
-            if file_path.lower().endswith('.gif') or file_path.lower().endswith('.webm'):
+            if any(file_path.lower().endswith(ext) for ext in self.file_types):
                 self.fileDropped.emit(file_path)
 
 class WorkerThread(QThread):
@@ -63,7 +67,6 @@ class WorkerThread(QThread):
     def run(self):
         try:
             self.progress.emit("Processing video...")
-            # Run gif_to_mp4.process_video directly
             gif_to_mp4.process_video(
                 self.input_path, 
                 self.output_path, 
@@ -73,27 +76,54 @@ class WorkerThread(QThread):
                 threshold=self.threshold,
                 pad_frames=self.pad_frames
             )
-
             self.finished.emit(True, f"Successfully saved to {self.output_path}")
+        except Exception as e:
+            self.finished.emit(False, str(e))
 
+class SplitImageWorkerThread(QThread):
+    finished = pyqtSignal(bool, str)
+    progress = pyqtSignal(str)
+
+    def __init__(self, input_path, output_dir, min_area, min_alpha):
+        super().__init__()
+        self.input_path = input_path
+        self.output_dir = output_dir
+        self.min_area = min_area
+        self.min_alpha = min_alpha
+
+    def run(self):
+        try:
+            self.progress.emit("Splitting image...")
+            saved_files = split_image.split_and_save_shapes(self.input_path, self.output_dir, self.min_area, self.min_alpha)
+            self.finished.emit(True, f"Successfully extracted {len(saved_files)} shapes to {self.output_dir}")
         except Exception as e:
             self.finished.emit(False, str(e))
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("GIF to MP4 Processor")
-        self.setGeometry(100, 100, 500, 450)
+        self.setWindowTitle("Media Processor")
+        self.setGeometry(100, 100, 550, 500)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+        
+        self.tabs = QTabWidget()
+        main_layout.addWidget(self.tabs)
+        
+        self.init_gif_tab()
+        self.init_split_tab()
+
+    def init_gif_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
 
         # 1. Input File Section
-        input_group = QGroupBox("Input GIF")
+        input_group = QGroupBox("Input GIF/WEBM")
         input_layout = QVBoxLayout()
         
-        self.drop_label = DragDropLabel()
+        self.drop_label = DragDropLabel(file_types=['.gif', '.webm'])
         self.drop_label.fileDropped.connect(self.on_file_dropped)
         input_layout.addWidget(self.drop_label)
 
@@ -106,7 +136,7 @@ class MainWindow(QMainWindow):
         input_layout.addWidget(self.file_path_label)
         
         input_group.setLayout(input_layout)
-        main_layout.addWidget(input_group)
+        layout.addWidget(input_group)
 
         # 2. Settings Section
         settings_group = QGroupBox("Settings")
@@ -140,7 +170,7 @@ class MainWindow(QMainWindow):
         form_layout.addRow("Pad Last Frame (Count):", self.pad_frames_input)
 
         settings_group.setLayout(form_layout)
-        main_layout.addWidget(settings_group)
+        layout.addWidget(settings_group)
 
         # 3. Action Section
         self.process_btn = QPushButton("Process and Save As MP4")
@@ -148,14 +178,75 @@ class MainWindow(QMainWindow):
         self.process_btn.setStyleSheet("font-weight: bold; font-size: 14px;")
         self.process_btn.clicked.connect(self.process_file)
         self.process_btn.setEnabled(False)
-        main_layout.addWidget(self.process_btn)
+        layout.addWidget(self.process_btn)
 
         self.status_label = QLabel("")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(self.status_label)
+        layout.addWidget(self.status_label)
 
         self.current_file = None
+        self.tabs.addTab(tab, "GIF to MP4")
 
+    def init_split_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # 1. Input File Section
+        input_group = QGroupBox("Input PNG/WEBP Image")
+        input_layout = QVBoxLayout()
+        
+        self.split_drop_label = DragDropLabel(text="Drag and Drop PNG/WEBP file here\nor\nClick 'Browse' to select", file_types=['.png', '.webp'])
+        self.split_drop_label.fileDropped.connect(self.on_split_file_dropped)
+        input_layout.addWidget(self.split_drop_label)
+
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self.browse_split_file)
+        input_layout.addWidget(browse_btn)
+        
+        self.split_file_path_label = QLabel("No file selected")
+        self.split_file_path_label.setWordWrap(True)
+        input_layout.addWidget(self.split_file_path_label)
+        
+        input_group.setLayout(input_layout)
+        layout.addWidget(input_group)
+        
+        # 2. Settings Section
+        split_settings_group = QGroupBox("Settings")
+        split_form_layout = QFormLayout()
+
+        self.split_min_area_input = QSpinBox()
+        self.split_min_area_input.setRange(1, 100000)
+        self.split_min_area_input.setValue(50)
+        self.split_min_area_input.setToolTip("Minimum area (in pixels) to be considered a shape, used to filter out noise.")
+        split_form_layout.addRow("Minimum Area:", self.split_min_area_input)
+
+        self.split_min_alpha_input = QSpinBox()
+        self.split_min_alpha_input.setRange(1, 255)
+        self.split_min_alpha_input.setValue(10)
+        self.split_min_alpha_input.setToolTip("Minimum alpha value (0-255) to be considered opaque.")
+        split_form_layout.addRow("Minimum Alpha Threshold:", self.split_min_alpha_input)
+
+        split_settings_group.setLayout(split_form_layout)
+        layout.addWidget(split_settings_group)
+        
+        layout.addStretch()
+
+        # 3. Action Section
+        self.split_process_btn = QPushButton("Process and Extract Shapes")
+        self.split_process_btn.setFixedHeight(40)
+        self.split_process_btn.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.split_process_btn.clicked.connect(self.process_split_file)
+        self.split_process_btn.setEnabled(False)
+        layout.addWidget(self.split_process_btn)
+
+        self.split_status_label = QLabel("")
+        self.split_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.split_status_label)
+
+        self.split_current_file = None
+        self.tabs.addTab(tab, "Image Shape Splitter")
+
+    # GIF Tab Methods
     def on_file_dropped(self, file_path):
         self.current_file = file_path
         self.file_path_label.setText(f"Selected: {file_path}")
@@ -204,6 +295,52 @@ class MainWindow(QMainWindow):
         self.drop_label.setEnabled(True)
         self.replace_bg_check.setEnabled(True)
         self.status_label.setText(message)
+        
+        if success:
+            QMessageBox.information(self, "Success", "Processing complete!\n" + message)
+        else:
+            QMessageBox.critical(self, "Error", "An error occurred:\n" + message)
+
+    # Split Tab Methods
+    def on_split_file_dropped(self, file_path):
+        self.split_current_file = file_path
+        self.split_file_path_label.setText(f"Selected: {file_path}")
+        self.split_process_btn.setEnabled(True)
+        self.split_drop_label.setText("File Selected")
+        self.split_drop_label.setStyleSheet("border-color: #55cc55; background-color: #e0ffe0; color: #005500; border-style: solid;")
+
+    def browse_split_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select File", "", "Image Files (*.png *.webp);;PNG Files (*.png);;WEBP Files (*.webp)")
+        if file_path:
+            self.on_split_file_dropped(file_path)
+
+    def process_split_file(self):
+        if not self.split_current_file:
+            return
+
+        output_dir = QFileDialog.getExistingDirectory(self, "Select Output Directory")
+        if not output_dir:
+            return
+
+        min_area = self.split_min_area_input.value()
+        min_alpha = self.split_min_alpha_input.value()
+
+        self.split_thread = SplitImageWorkerThread(self.split_current_file, output_dir, min_area, min_alpha)
+        self.split_thread.finished.connect(self.on_split_finished)
+        self.split_thread.progress.connect(self.update_split_status)
+        
+        self.split_process_btn.setEnabled(False)
+        self.split_drop_label.setEnabled(False)
+        self.split_status_label.setText("Starting...")
+        self.split_thread.start()
+
+    def update_split_status(self, message):
+        self.split_status_label.setText(message)
+
+    def on_split_finished(self, success, message):
+        self.split_process_btn.setEnabled(True)
+        self.split_drop_label.setEnabled(True)
+        self.split_status_label.setText(message)
         
         if success:
             QMessageBox.information(self, "Success", "Processing complete!\n" + message)
