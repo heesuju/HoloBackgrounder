@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QGr
 from tabs.gif_tab import GifTab
 from tabs.split_tab import SplitTab
 from tabs.rename_tab import RenameTab
+from tabs.transparency_tab import TransparencyTab
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -42,10 +43,12 @@ class MainWindow(QMainWindow):
         self.gif_tab = GifTab(self)
         self.split_tab = SplitTab(self)
         self.rename_tab = RenameTab(self)
+        self.transparency_tab = TransparencyTab(self)
 
         self.tabs.addTab(self.gif_tab, "GIF to MP4")
         self.tabs.addTab(self.split_tab, "Image Shape Splitter")
         self.tabs.addTab(self.rename_tab, "Batch Renamer")
+        self.tabs.addTab(self.transparency_tab, "Color to Transparency")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
