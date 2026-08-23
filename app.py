@@ -219,9 +219,17 @@ class MainWindow(QMainWindow):
         self.split_drop_label.fileDropped.connect(self.on_split_file_dropped)
         input_layout.addWidget(self.split_drop_label)
 
+        btn_layout = QHBoxLayout()
         browse_btn = QPushButton("Browse")
         browse_btn.clicked.connect(self.browse_split_file)
-        input_layout.addWidget(browse_btn)
+        btn_layout.addWidget(browse_btn)
+        
+        self.split_clear_btn = QPushButton("Clear")
+        self.split_clear_btn.clicked.connect(self.clear_split_file)
+        self.split_clear_btn.setEnabled(False)
+        btn_layout.addWidget(self.split_clear_btn)
+        
+        input_layout.addLayout(btn_layout)
         
         self.split_file_path_label = QLabel("No file selected")
         self.split_file_path_label.setWordWrap(True)
@@ -333,8 +341,29 @@ class MainWindow(QMainWindow):
         self.split_current_file = file_path
         self.split_file_path_label.setText(f"Selected: {file_path}")
         self.split_process_btn.setEnabled(True)
+        self.split_clear_btn.setEnabled(True)
         self.split_drop_label.setText("File Selected")
         self.split_drop_label.setStyleSheet("border-color: #55cc55; background-color: #e0ffe0; color: #005500; border-style: solid;")
+
+    def clear_split_file(self):
+        self.split_current_file = None
+        self.split_file_path_label.setText("No file selected")
+        self.split_process_btn.setEnabled(False)
+        self.split_clear_btn.setEnabled(False)
+        self.split_drop_label.setText("Drag and Drop PNG/WEBP file here\nor\nClick 'Browse' to select")
+        self.split_drop_label.setStyleSheet("""
+            QLabel {
+                border: 2px dashed #aaa;
+                border-radius: 10px;
+                padding: 20px;
+                background-color: #f0f0f0;
+                color: #555;
+            }
+            QLabel:hover {
+                border-color: #55aaff;
+                background-color: #e0f0ff;
+            }
+        """)
 
     def browse_split_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select File", "", "Image Files (*.png *.webp);;PNG Files (*.png);;WEBP Files (*.webp)")
