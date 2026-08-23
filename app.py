@@ -9,6 +9,7 @@ from tabs.gif_tab import GifTab
 from tabs.split_tab import SplitTab
 from tabs.rename_tab import RenameTab
 from tabs.transparency_tab import TransparencyTab
+from tabs.outline_tab import OutlineTab
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -91,11 +92,13 @@ class MainWindow(QMainWindow):
         self.split_tab = SplitTab(self)
         self.rename_tab = RenameTab(self)
         self.transparency_tab = TransparencyTab(self)
+        self.outline_tab = OutlineTab(self)
 
         self.tabs.addTab(self.gif_tab, "GIF to MP4")
         self.tabs.addTab(self.split_tab, "Image Shape Splitter")
         self.tabs.addTab(self.rename_tab, "Batch Renamer")
         self.tabs.addTab(self.transparency_tab, "Color to Transparency")
+        self.tabs.addTab(self.outline_tab, "Outline Generator")
         
     def on_files_dropped(self, file_paths):
         self.current_files = file_paths
