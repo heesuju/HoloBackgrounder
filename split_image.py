@@ -60,7 +60,7 @@ def split_and_save_shapes(input_path, output_dir=None, min_area=50, min_alpha=10
         # This ensures overlapping bounding boxes from other shapes are masked out
         cropped_img[:, :, 3] = cv2.bitwise_and(cropped_img[:, :, 3], cropped_mask)
         
-        output_filename = f"{base_name}_part_{start_index + shape_count}.png"
+        output_filename = f"{base_name}{start_index + shape_count}.png"
         output_path = os.path.join(output_dir, output_filename)
         
         cv2.imwrite(output_path, cropped_img)

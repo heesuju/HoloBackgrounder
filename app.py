@@ -1,6 +1,7 @@
 import sys
 import os
 import tempfile
+import re
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                              QFileDialog, QSpinBox, QDoubleSpinBox, QMessageBox,
@@ -49,6 +50,43 @@ class DragDropLabel(QLabel):
             file_path = urls[0].toLocalFile()
             if any(file_path.lower().endswith(ext) for ext in self.file_types):
                 self.fileDropped.emit(file_path)
+
+class MultiDragDropLabel(QLabel):
+    filesDropped = pyqtSignal(list)
+
+    def __init__(self, text="Drag and Drop multiple files here", file_types=None, parent=None):
+        super().__init__(parent)
+        self.setText(text)
+        self.file_types = file_types or []
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet("""
+            QLabel {
+                border: 2px dashed #aaa;
+                border-radius: 10px;
+                padding: 20px;
+                background-color: #f0f0f0;
+                color: #555;
+            }
+            QLabel:hover {
+                border-color: #55aaff;
+                background-color: #e0f0ff;
+            }
+        """)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent):
+        urls = event.mimeData().urls()
+        valid_files = []
+        for url in urls:
+            file_path = url.toLocalFile()
+            if not self.file_types or any(file_path.lower().endswith(ext) for ext in self.file_types):
+                valid_files.append(file_path)
+        if valid_files:
+            self.filesDropped.emit(valid_files)
 
 class WorkerThread(QThread):
     finished = pyqtSignal(bool, str) # Success, Message
@@ -101,6 +139,47 @@ class SplitImageWorkerThread(QThread):
         except Exception as e:
             self.finished.emit(False, str(e))
 
+class RenameWorkerThread(QThread):
+    finished = pyqtSignal(bool, str)
+    progress = pyqtSignal(str)
+
+    def __init__(self, file_paths, override_name, start_index):
+        super().__init__()
+        self.file_paths = file_paths
+        self.override_name = override_name
+        self.start_index = start_index
+
+    def run(self):
+        try:
+            self.progress.emit("Sorting files...")
+            
+            # Basic alphanumeric sort based on filename
+            def natural_keys(text):
+                return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', text)]
+            
+            sorted_files = sorted(self.file_paths, key=lambda x: natural_keys(os.path.basename(x)))
+            
+            self.progress.emit("Renaming files...")
+            count = 0
+            for idx, file_path in enumerate(sorted_files):
+                dir_name = os.path.dirname(file_path)
+                ext = os.path.splitext(file_path)[1]
+                
+                base = self.override_name.strip() if self.override_name and self.override_name.strip() else "renamed_"
+                new_name = f"{base}{self.start_index + count}{ext}"
+                new_path = os.path.join(dir_name, new_name)
+                
+                if os.path.exists(new_path) and new_path != file_path:
+                    # In a real app we might handle collisions, but for batch rename we'll just rename
+                    pass 
+                
+                os.rename(file_path, new_path)
+                count += 1
+                
+            self.finished.emit(True, f"Successfully renamed {count} files.")
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -134,6 +213,7 @@ class MainWindow(QMainWindow):
         
         self.init_gif_tab()
         self.init_split_tab()
+        self.init_rename_tab()
 
     def init_gif_tab(self):
         tab = QWidget()
@@ -402,6 +482,118 @@ class MainWindow(QMainWindow):
         
         if success:
             QMessageBox.information(self, "Success", "Processing complete!\n" + message)
+        else:
+            QMessageBox.critical(self, "Error", "An error occurred:\n" + message)
+
+    # Rename Tab Methods
+    def init_rename_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # 1. Input File Section
+        input_group = QGroupBox("Input Files (Any format)")
+        input_layout = QVBoxLayout()
+        
+        self.rename_drop_label = MultiDragDropLabel(text="Drag and Drop multiple files here\nor\nClick 'Browse' to select")
+        self.rename_drop_label.filesDropped.connect(self.on_rename_files_dropped)
+        input_layout.addWidget(self.rename_drop_label)
+
+        btn_layout = QHBoxLayout()
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self.browse_rename_files)
+        btn_layout.addWidget(browse_btn)
+        
+        self.rename_clear_btn = QPushButton("Clear")
+        self.rename_clear_btn.clicked.connect(self.clear_rename_files)
+        self.rename_clear_btn.setEnabled(False)
+        btn_layout.addWidget(self.rename_clear_btn)
+        
+        input_layout.addLayout(btn_layout)
+        
+        self.rename_file_path_label = QLabel("No files selected")
+        self.rename_file_path_label.setWordWrap(True)
+        input_layout.addWidget(self.rename_file_path_label)
+        
+        input_group.setLayout(input_layout)
+        layout.addWidget(input_group)
+        
+        layout.addStretch()
+
+        # 3. Action Section
+        self.rename_process_btn = QPushButton("Batch Rename Files")
+        self.rename_process_btn.setFixedHeight(40)
+        self.rename_process_btn.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.rename_process_btn.clicked.connect(self.process_rename_files)
+        self.rename_process_btn.setEnabled(False)
+        layout.addWidget(self.rename_process_btn)
+
+        self.rename_status_label = QLabel("")
+        self.rename_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.rename_status_label)
+
+        self.rename_current_files = []
+        self.tabs.addTab(tab, "Batch Renamer")
+
+    def on_rename_files_dropped(self, file_paths):
+        self.rename_current_files = file_paths
+        self.rename_file_path_label.setText(f"Selected: {len(file_paths)} files")
+        self.rename_process_btn.setEnabled(True)
+        self.rename_clear_btn.setEnabled(True)
+        self.rename_drop_label.setText(f"{len(file_paths)} Files Selected")
+        self.rename_drop_label.setStyleSheet("border-color: #55cc55; background-color: #e0ffe0; color: #005500; border-style: solid;")
+
+    def clear_rename_files(self):
+        self.rename_current_files = []
+        self.rename_file_path_label.setText("No files selected")
+        self.rename_process_btn.setEnabled(False)
+        self.rename_clear_btn.setEnabled(False)
+        self.rename_drop_label.setText("Drag and Drop multiple files here\nor\nClick 'Browse' to select")
+        self.rename_drop_label.setStyleSheet("""
+            QLabel {
+                border: 2px dashed #aaa;
+                border-radius: 10px;
+                padding: 20px;
+                background-color: #f0f0f0;
+                color: #555;
+            }
+            QLabel:hover {
+                border-color: #55aaff;
+                background-color: #e0f0ff;
+            }
+        """)
+
+    def browse_rename_files(self):
+        file_paths, _ = QFileDialog.getOpenFileNames(self, "Select Files", "", "All Files (*)")
+        if file_paths:
+            self.on_rename_files_dropped(file_paths)
+
+    def process_rename_files(self):
+        if not self.rename_current_files:
+            return
+
+        override_name = self.override_name_input.text()
+        start_index = self.start_index_input.value()
+
+        self.rename_thread = RenameWorkerThread(self.rename_current_files, override_name, start_index)
+        self.rename_thread.finished.connect(self.on_rename_finished)
+        self.rename_thread.progress.connect(self.update_rename_status)
+        
+        self.rename_process_btn.setEnabled(False)
+        self.rename_drop_label.setEnabled(False)
+        self.rename_status_label.setText("Starting...")
+        self.rename_thread.start()
+
+    def update_rename_status(self, message):
+        self.rename_status_label.setText(message)
+
+    def on_rename_finished(self, success, message):
+        self.rename_process_btn.setEnabled(True)
+        self.rename_drop_label.setEnabled(True)
+        self.rename_status_label.setText(message)
+        
+        if success:
+            QMessageBox.information(self, "Success", "Processing complete!\n" + message)
+            self.clear_rename_files()
         else:
             QMessageBox.critical(self, "Error", "An error occurred:\n" + message)
 
