@@ -60,21 +60,27 @@ class RenameWorkerThread(QThread):
     finished = pyqtSignal(bool, str)
     progress = pyqtSignal(str)
 
-    def __init__(self, file_paths, override_name, start_index):
+    def __init__(self, file_paths, override_name, start_index, order_by="Name (Alphanumerical)"):
         super().__init__()
         self.file_paths = file_paths
         self.override_name = override_name
         self.start_index = start_index
+        self.order_by = order_by
 
     def run(self):
         try:
             self.progress.emit("Sorting files...")
             
-            # Basic alphanumeric sort based on filename
-            def natural_keys(text):
-                return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', text)]
-            
-            sorted_files = sorted(self.file_paths, key=lambda x: natural_keys(os.path.basename(x)))
+            if self.order_by == "Date Created":
+                sorted_files = sorted(self.file_paths, key=lambda x: os.path.getctime(x))
+            elif self.order_by == "Date Modified":
+                sorted_files = sorted(self.file_paths, key=lambda x: os.path.getmtime(x))
+            else:
+                # Basic alphanumeric sort based on filename
+                def natural_keys(text):
+                    return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', text)]
+                
+                sorted_files = sorted(self.file_paths, key=lambda x: natural_keys(os.path.basename(x)))
             
             self.progress.emit("Renaming files...")
             count = 0

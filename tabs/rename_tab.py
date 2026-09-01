@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QPushButton, QLabel, QHBoxLayout, QFileDialog, QMessageBox
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QPushButton, QLabel, QHBoxLayout, QFileDialog, QMessageBox, QComboBox
 from PyQt6.QtCore import Qt
 from components import MultiDragDropLabel
 from workers import RenameWorkerThread
@@ -13,6 +13,18 @@ class RenameTab(QWidget):
         layout = QVBoxLayout(self)
 
         # Settings Section
+        settings_group = QGroupBox("Rename Settings")
+        settings_layout = QVBoxLayout()
+        
+        order_layout = QHBoxLayout()
+        order_layout.addWidget(QLabel("Order By:"))
+        self.order_combo = QComboBox()
+        self.order_combo.addItems(["Name (Alphanumerical)", "Date Created", "Date Modified"])
+        order_layout.addWidget(self.order_combo)
+        settings_layout.addLayout(order_layout)
+        
+        settings_group.setLayout(settings_layout)
+        layout.addWidget(settings_group)
         
         layout.addStretch()
 
@@ -28,8 +40,9 @@ class RenameTab(QWidget):
 
         override_name = self.main_window.override_name_input.text()
         start_index = self.main_window.start_index_input.value()
+        order_by = self.order_combo.currentText()
 
-        self.rename_thread = RenameWorkerThread(self.rename_current_files, override_name, start_index)
+        self.rename_thread = RenameWorkerThread(self.rename_current_files, override_name, start_index, order_by)
         self.rename_thread.finished.connect(self.on_rename_finished)
         self.rename_thread.progress.connect(self.update_rename_status)
         
