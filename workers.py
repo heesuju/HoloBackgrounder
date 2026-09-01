@@ -137,3 +137,44 @@ class CropWorkerThread(QThread):
             self.finished.emit(True, f"Successfully cropped {count} images.")
         except Exception as e:
             self.finished.emit(False, str(e))
+
+class PdfWorkerThread(QThread):
+    finished = pyqtSignal(bool, str)
+    progress = pyqtSignal(str)
+
+    def __init__(self, file_paths, output_path):
+        super().__init__()
+        self.file_paths = file_paths
+        self.output_path = output_path
+
+    def run(self):
+        try:
+            self.progress.emit("Creating PDF...")
+            from PIL import Image
+            
+            if not self.file_paths:
+                self.finished.emit(False, "No files to process.")
+                return
+
+            images = []
+            first_image = None
+            
+            count = 0
+            for idx, file_path in enumerate(self.file_paths):
+                try:
+                    img = Image.open(file_path).convert('RGB')
+                    if idx == 0:
+                        first_image = img
+                    else:
+                        images.append(img)
+                    count += 1
+                except Exception as ex:
+                    print(f"Failed to open {file_path}: {ex}")
+            
+            if first_image:
+                first_image.save(self.output_path, "PDF" ,resolution=100.0, save_all=True, append_images=images)
+                self.finished.emit(True, f"Successfully created PDF with {count} pages.")
+            else:
+                self.finished.emit(False, "Failed to open any valid images.")
+        except Exception as e:
+            self.finished.emit(False, str(e))
