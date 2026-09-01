@@ -96,3 +96,44 @@ class RenameWorkerThread(QThread):
             self.finished.emit(True, f"Successfully renamed {count} files.")
         except Exception as e:
             self.finished.emit(False, str(e))
+
+class CropWorkerThread(QThread):
+    finished = pyqtSignal(bool, str)
+    progress = pyqtSignal(str)
+
+    def __init__(self, file_paths, output_dir, crop_rect, override_name, start_index):
+        super().__init__()
+        self.file_paths = file_paths
+        self.output_dir = output_dir
+        self.crop_rect = crop_rect # (x, y, w, h)
+        self.override_name = override_name
+        self.start_index = start_index
+
+    def run(self):
+        try:
+            from PIL import Image
+            self.progress.emit("Cropping images...")
+            
+            x, y, w, h = self.crop_rect
+            
+            count = 0
+            for idx, file_path in enumerate(self.file_paths):
+                try:
+                    img = Image.open(file_path)
+                    
+                    # Ensure coordinates are within bounds (optional, but PIL crop handles it mostly)
+                    cropped_img = img.crop((x, y, x + w, y + h))
+                    
+                    ext = os.path.splitext(file_path)[1]
+                    base = self.override_name.strip() if self.override_name and self.override_name.strip() else "cropped_"
+                    new_name = f"{base}{self.start_index + count}{ext}"
+                    new_path = os.path.join(self.output_dir, new_name)
+                    
+                    cropped_img.save(new_path)
+                    count += 1
+                except Exception as ex:
+                    print(f"Failed to crop {file_path}: {ex}")
+                    
+            self.finished.emit(True, f"Successfully cropped {count} images.")
+        except Exception as e:
+            self.finished.emit(False, str(e))
