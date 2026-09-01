@@ -2,7 +2,8 @@ import os
 from PIL import Image
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
-                             QFileDialog, QGroupBox, QMessageBox, QGraphicsRectItem)
+                             QFileDialog, QGroupBox, QMessageBox, QGraphicsRectItem,
+                             QGraphicsItem)
 from PyQt6.QtCore import Qt, QRectF, QRect
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QBrush
 
@@ -18,6 +19,147 @@ class ResizableGraphicsView(QGraphicsView):
         if self.scene() and not self.scene().sceneRect().isEmpty():
             self.fitInView(self.scene().sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
+class ResizableCropRect(QGraphicsRectItem):
+    def __init__(self, scene):
+        super().__init__()
+        self.scene_ref = scene
+        self.setAcceptHoverEvents(True)
+        
+        pen = QPen(QColor(255, 0, 0))
+        pen.setWidth(2)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        self.setPen(pen)
+        self.setBrush(QBrush(QColor(255, 0, 0, 50)))
+        self.setZValue(1)
+        
+        self.handle_size = 10
+        self.active_handle = None
+        self.dragging_center = False
+        self.drag_offset = None
+
+    def hoverMoveEvent(self, event):
+        handle = self.get_handle_at(event.pos())
+        if handle in ('tl', 'br'):
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        elif handle in ('tr', 'bl'):
+            self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+        elif handle in ('t', 'b'):
+            self.setCursor(Qt.CursorShape.SizeVerCursor)
+        elif handle in ('l', 'r'):
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        elif self.rect().contains(event.pos()):
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().hoverMoveEvent(event)
+        
+    def hoverLeaveEvent(self, event):
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().hoverLeaveEvent(event)
+
+    def get_handle_at(self, pos):
+        r = self.rect()
+        s = self.handle_size
+        handles = {
+            'tl': QRectF(r.left() - s/2, r.top() - s/2, s, s),
+            't':  QRectF(r.center().x() - s/2, r.top() - s/2, s, s),
+            'tr': QRectF(r.right() - s/2, r.top() - s/2, s, s),
+            'r':  QRectF(r.right() - s/2, r.center().y() - s/2, s, s),
+            'br': QRectF(r.right() - s/2, r.bottom() - s/2, s, s),
+            'b':  QRectF(r.center().x() - s/2, r.bottom() - s/2, s, s),
+            'bl': QRectF(r.left() - s/2, r.bottom() - s/2, s, s),
+            'l':  QRectF(r.left() - s/2, r.center().y() - s/2, s, s),
+        }
+        for k, v in handles.items():
+            if v.contains(pos):
+                return k
+        return None
+
+    def paint(self, painter, option, widget=None):
+        super().paint(painter, option, widget)
+        r = self.rect()
+        if r.isEmpty():
+            return
+            
+        s = self.handle_size
+        painter.setBrush(QBrush(QColor(255, 255, 255)))
+        painter.setPen(QPen(QColor(0, 0, 0)))
+        
+        handles = [
+            QRectF(r.left() - s/2, r.top() - s/2, s, s),
+            QRectF(r.center().x() - s/2, r.top() - s/2, s, s),
+            QRectF(r.right() - s/2, r.top() - s/2, s, s),
+            QRectF(r.right() - s/2, r.center().y() - s/2, s, s),
+            QRectF(r.right() - s/2, r.bottom() - s/2, s, s),
+            QRectF(r.center().x() - s/2, r.bottom() - s/2, s, s),
+            QRectF(r.left() - s/2, r.bottom() - s/2, s, s),
+            QRectF(r.left() - s/2, r.center().y() - s/2, s, s),
+        ]
+        for hr in handles:
+            painter.drawRect(hr)
+
+    def mousePressEvent(self, event):
+        self.active_handle = self.get_handle_at(event.pos())
+        if self.active_handle:
+            event.accept()
+        elif self.rect().contains(event.pos()):
+            self.dragging_center = True
+            self.drag_offset = event.pos() - self.rect().topLeft()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+            
+    def mouseMoveEvent(self, event):
+        if self.active_handle:
+            pos = event.pos()
+            r = self.rect()
+            
+            x1, y1 = r.left(), r.top()
+            x2, y2 = r.right(), r.bottom()
+            
+            if 't' in self.active_handle: y1 = pos.y()
+            if 'b' in self.active_handle: y2 = pos.y()
+            if 'l' in self.active_handle: x1 = pos.x()
+            if 'r' in self.active_handle: x2 = pos.x()
+            
+            scene_rect = self.scene_ref.sceneRect()
+            x1 = max(scene_rect.left(), min(x1, scene_rect.right()))
+            y1 = max(scene_rect.top(), min(y1, scene_rect.bottom()))
+            x2 = max(scene_rect.left(), min(x2, scene_rect.right()))
+            y2 = max(scene_rect.top(), min(y2, scene_rect.bottom()))
+            
+            if x2 < x1:
+                if 'l' in self.active_handle: x1 = x2
+                elif 'r' in self.active_handle: x2 = x1
+            if y2 < y1:
+                if 't' in self.active_handle: y1 = y2
+                elif 'b' in self.active_handle: y2 = y1
+            
+            self.setRect(QRectF(x1, y1, x2 - x1, y2 - y1))
+            self.scene_ref.update_current_rect()
+            event.accept()
+            
+        elif self.dragging_center:
+            pos = event.pos()
+            r = self.rect()
+            new_top_left = pos - self.drag_offset
+            
+            scene_rect = self.scene_ref.sceneRect()
+            x = max(scene_rect.left(), min(new_top_left.x(), scene_rect.right() - r.width()))
+            y = max(scene_rect.top(), min(new_top_left.y(), scene_rect.bottom() - r.height()))
+            
+            self.setRect(QRectF(x, y, r.width(), r.height()))
+            self.scene_ref.update_current_rect()
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+            
+    def mouseReleaseEvent(self, event):
+        self.active_handle = None
+        self.dragging_center = False
+        self.scene_ref.update_current_rect()
+        super().mouseReleaseEvent(event)
+
 class CropScene(QGraphicsScene):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -25,13 +167,7 @@ class CropScene(QGraphicsScene):
         self.is_dragging = False
         self.start_pos = None
         
-        self.rect_item = QGraphicsRectItem()
-        pen = QPen(QColor(255, 0, 0))
-        pen.setWidth(2)
-        pen.setStyle(Qt.PenStyle.DashLine)
-        self.rect_item.setPen(pen)
-        self.rect_item.setBrush(QBrush(QColor(255, 0, 0, 50))) # semi-transparent red
-        self.rect_item.setZValue(1)
+        self.rect_item = ResizableCropRect(self)
         self.addItem(self.rect_item)
         self.rect_item.hide()
         self.current_rect = None
@@ -46,6 +182,11 @@ class CropScene(QGraphicsScene):
     def mousePressEvent(self, event):
         if self.tab.original_img is None:
             return
+
+        super().mousePressEvent(event)
+        if self.rect_item.active_handle or self.rect_item.dragging_center:
+            return
+
         self.is_dragging = True
         self.start_pos = event.scenePos()
         self.rect_item.setRect(QRectF(self.start_pos, self.start_pos))
@@ -119,13 +260,16 @@ class CropScene(QGraphicsScene):
     def mouseReleaseEvent(self, event):
         if self.is_dragging:
             self.is_dragging = False
-            rect = self.rect_item.rect()
-            if rect.width() > 0 and rect.height() > 0:
-                self.current_rect = rect
-            else:
-                self.rect_item.hide()
-                self.current_rect = None
+            self.update_current_rect()
         super().mouseReleaseEvent(event)
+
+    def update_current_rect(self):
+        rect = self.rect_item.rect()
+        if rect.width() > 0 and rect.height() > 0:
+            self.current_rect = rect
+        else:
+            self.rect_item.hide()
+            self.current_rect = None
 
 class CropTab(QWidget):
     def __init__(self, main_window):
