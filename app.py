@@ -107,10 +107,14 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.pdf_tab, "Images to PDF")
         
     def on_files_dropped(self, file_paths):
-        self.current_files = file_paths
-        self.file_path_label.setText(f"Selected: {len(file_paths)} files")
+        import re, os
+        def natural_keys(text):
+            return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', text)]
+        
+        self.current_files = sorted(file_paths, key=lambda x: natural_keys(os.path.basename(x)))
+        self.file_path_label.setText(f"Selected: {len(self.current_files)} files")
         self.clear_btn.setEnabled(True)
-        self.drop_label.setText(f"{len(file_paths)} Files Selected")
+        self.drop_label.setText(f"{len(self.current_files)} Files Selected")
         self.drop_label.setStyleSheet("border-color: #55cc55; background-color: #e0ffe0; color: #005500; border-style: solid;")
         self.notify_tabs()
 

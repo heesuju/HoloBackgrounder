@@ -172,7 +172,7 @@ class PdfWorkerThread(QThread):
                     print(f"Failed to open {file_path}: {ex}")
             
             if first_image:
-                first_image.save(self.output_path, "PDF" ,resolution=100.0, save_all=True, append_images=images)
+                first_image.save(self.output_path, "PDF" ,resolution=100.0, save_all=True, append_images=images, quality=100)
                 self.finished.emit(True, f"Successfully created PDF with {count} pages.")
             else:
                 self.finished.emit(False, "Failed to open any valid images.")
