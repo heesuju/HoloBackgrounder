@@ -184,3 +184,60 @@ class PdfWorkerThread(QThread):
                 self.finished.emit(False, "Failed to open any valid images.")
         except Exception as e:
             self.finished.emit(False, str(e))
+
+class PixelWorkerThread(QThread):
+    finished = pyqtSignal(bool, str)
+    progress = pyqtSignal(str)
+
+    def __init__(self, file_paths, output_dir, pixel_size, num_colors, dither, crisp_alpha, output_scale, override_name, start_index):
+        super().__init__()
+        self.file_paths = file_paths
+        self.output_dir = output_dir
+        self.pixel_size = pixel_size
+        self.num_colors = num_colors
+        self.dither = dither
+        self.crisp_alpha = crisp_alpha
+        self.output_scale = output_scale
+        self.override_name = override_name
+        self.start_index = start_index
+
+    def run(self):
+        try:
+            import pixel_art
+            self.progress.emit("Pixelating images...")
+            count = 0
+            total = len(self.file_paths)
+            for idx, file_path in enumerate(self.file_paths):
+                try:
+                    self.progress.emit(f"Processing ({idx + 1}/{total}): {os.path.basename(file_path)}")
+                    
+                    effective_size = self.pixel_size
+                    if effective_size == 'auto' or effective_size == 'recommend':
+                        effective_size = pixel_art.recommend_pixel_size(file_path)
+                    
+                    result_img, _ = pixel_art.process_pixel_art(
+                        file_path,
+                        target_pixel_size=effective_size,
+                        num_colors=self.num_colors,
+                        dither=self.dither,
+                        crisp_alpha=self.crisp_alpha,
+                        output_scale=self.output_scale
+                    )
+                    
+                    ext = os.path.splitext(file_path)[1]
+                    if ext.lower() not in ('.png', '.webp', '.jpg', '.jpeg', '.bmp'):
+                        ext = '.png'
+                        
+                    base = self.override_name.strip() if self.override_name and self.override_name.strip() else "pixel_"
+                    new_name = f"{base}{self.start_index + count}{ext}"
+                    new_path = os.path.join(self.output_dir, new_name)
+                    
+                    result_img.save(new_path)
+                    count += 1
+                except Exception as ex:
+                    print(f"Failed to pixelate {file_path}: {ex}")
+                    
+            self.finished.emit(True, f"Successfully pixelated {count} images.")
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
