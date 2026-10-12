@@ -14,6 +14,7 @@ from tabs.crop_tab import CropTab
 from tabs.pdf_tab import PdfTab
 from tabs.pixel_tab import PixelTab
 from tabs.icon_tab import IconTab
+from tabs.resize_tab import ResizeTab
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -101,6 +102,7 @@ class MainWindow(QMainWindow):
         self.pdf_tab = PdfTab(self)
         self.pixel_tab = PixelTab(self)
         self.icon_tab = IconTab(self)
+        self.resize_tab = ResizeTab(self)
 
         self.tabs.addTab(self.gif_tab, "GIF to MP4")
         self.tabs.addTab(self.split_tab, "Image Shape Splitter")
@@ -111,6 +113,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.pdf_tab, "Images to PDF")
         self.tabs.addTab(self.pixel_tab, "픽셀화")
         self.tabs.addTab(self.icon_tab, "Icon Generator")
+        self.tabs.addTab(self.resize_tab, "Lossless Resize")
         
     def on_files_dropped(self, file_paths):
         import re, os
