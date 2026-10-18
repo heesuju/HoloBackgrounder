@@ -7,11 +7,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLa
 from PyQt6.QtCore import Qt, QPointF
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QBrush, QKeySequence, QShortcut
 
-class ResizableGraphicsView(QGraphicsView):
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.scene() and not self.scene().sceneRect().isEmpty():
-            self.fitInView(self.scene().sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+from components import ZoomableGraphicsView
 
 class ImageScene(QGraphicsScene):
     def __init__(self, parent=None):
@@ -120,8 +116,10 @@ class TransparencyTab(QWidget):
         controls_group.setLayout(controls_layout)
         layout.addWidget(controls_group)
 
-        # Image View
-        self.view = ResizableGraphicsView()
+        layout.addStretch()
+
+        # Image View (shown in the main window's preview panel)
+        self.view = ZoomableGraphicsView()
         self.scene = ImageScene(self)
         self.view.setScene(self.scene)
         self.pixmap_item = QGraphicsPixmapItem()
@@ -130,7 +128,7 @@ class TransparencyTab(QWidget):
         # Checkerboard background
         bg_pixmap = self.create_checkerboard_pattern()
         self.view.setBackgroundBrush(QBrush(bg_pixmap))
-        layout.addWidget(self.view)
+        self.preview_widget = self.view
 
         # Shortcuts
         self.undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
@@ -191,7 +189,7 @@ class TransparencyTab(QWidget):
                 self.view.setCursor(Qt.CursorShape.ArrowCursor)
                 
                 self.update_display()
-                self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+                self.view.fit_view()
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to load image: {e}")
 

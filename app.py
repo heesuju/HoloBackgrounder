@@ -1,10 +1,10 @@
 import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QGroupBox, 
                              QFormLayout, QLineEdit, QSpinBox, QTabWidget, QHBoxLayout, 
-                             QPushButton, QLabel, QFileDialog)
+                             QPushButton, QLabel, QFileDialog, QSplitter, QStackedWidget)
 from PyQt6.QtCore import pyqtSignal, Qt
 
-from components import MultiDragDropLabel
+from components import MultiDragDropLabel, FilePreview
 from tabs.gif_tab import GifTab
 from tabs.split_tab import SplitTab
 from tabs.rename_tab import RenameTab
@@ -21,13 +21,15 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Media Processor")
-        self.setGeometry(100, 100, 600, 750)
+        self.setGeometry(100, 100, 1400, 850)
         
         self.current_files = []
 
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.setCentralWidget(splitter)
+
+        left_widget = QWidget()
+        main_layout = QVBoxLayout(left_widget)
         
         # 1. Global Input Section
         input_group = QGroupBox("Global Input Files (Drag & Drop)")
@@ -90,8 +92,31 @@ class MainWindow(QMainWindow):
         self.global_status_label = QLabel("")
         self.global_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         main_layout.addWidget(self.global_status_label)
-        
+
+        # 5. Preview (right side) - shows the current tab's preview widget
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        preview_group = QGroupBox("Preview")
+        preview_layout = QVBoxLayout()
+        self.preview_stack = QStackedWidget()
+        self.file_preview = FilePreview()
+        self.preview_stack.addWidget(self.file_preview)
+        preview_layout.addWidget(self.preview_stack)
+        hint = QLabel("Scroll: zoom  ·  Middle-drag: pan  ·  Middle double-click: fit")
+        hint.setStyleSheet("color: #777;")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview_layout.addWidget(hint)
+        preview_group.setLayout(preview_layout)
+        right_layout.addWidget(preview_group)
+
+        splitter.addWidget(left_widget)
+        splitter.addWidget(right_widget)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([560, 840])
+
         self.init_tabs()
+        self.on_tab_changed(self.tabs.currentIndex())
 
     def init_tabs(self):
         self.gif_tab = GifTab(self)
@@ -117,6 +142,11 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.icon_tab, "Icon Generator")
         self.tabs.addTab(self.resize_tab, "Lossless Resize")
         self.tabs.addTab(self.region_tab, "Region Swap")
+
+        for i in range(self.tabs.count()):
+            preview = getattr(self.tabs.widget(i), 'preview_widget', None)
+            if preview is not None:
+                self.preview_stack.addWidget(preview)
         
     def on_files_dropped(self, file_paths):
         import re, os
@@ -156,10 +186,14 @@ class MainWindow(QMainWindow):
             self.on_files_dropped(file_paths)
             
     def on_tab_changed(self, index):
+        preview = getattr(self.tabs.currentWidget(), 'preview_widget', None)
+        self.preview_stack.setCurrentWidget(preview or self.file_preview)
         self.notify_tabs()
         
     def notify_tabs(self):
         current_widget = self.tabs.currentWidget()
+        if self.preview_stack.currentWidget() is self.file_preview:
+            self.file_preview.show_files(self.current_files)
         if hasattr(current_widget, 'on_global_files_changed'):
             current_widget.on_global_files_changed()
             

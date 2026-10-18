@@ -1,70 +1,25 @@
 import os
 from PIL import Image
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFileDialog, QGroupBox,
-    QMessageBox, QApplication, QFrame
+    QWidget, QVBoxLayout, QLabel, QFileDialog, QGroupBox, QMessageBox, QApplication,
+    QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsSimpleTextItem
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QImage, QPixmap, QPainter, QColor, QBrush
+from PyQt6.QtCore import Qt, QRectF
+from PyQt6.QtGui import QImage, QPixmap, QPen, QColor, QBrush, QFont
 
 import icon_generator
+from components import ZoomableGraphicsView, checkerboard_pixmap
 
-class IconPreview(QFrame):
-    def __init__(self, size, parent=None):
-        super().__init__(parent)
-        self.size = size
+CELL = 128        # on-screen box each icon is drawn into (scene units)
+GAP = 24
+CAPTION_H = 24
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
 
-        self.image_label = QLabel()
-        self.image_label.setFixedSize(128, 128)
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setStyleSheet("border: 1px solid #999;")
-        self.image_label.setPixmap(self.create_checkerboard_pattern())
-        layout.addWidget(self.image_label, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        self.caption = QLabel(f"{size} x {size}")
-        self.caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.caption.setStyleSheet("font-weight: bold;")
-        layout.addWidget(self.caption)
-
-    def create_checkerboard_pattern(self):
-        cell = 8
-        img = QImage(128, 128, QImage.Format.Format_RGB32)
-        painter = QPainter(img)
-        for y in range(0, 128, cell):
-            for x in range(0, 128, cell):
-                even = ((x // cell) + (y // cell)) % 2 == 0
-                painter.fillRect(x, y, cell, cell, QColor(225, 225, 225) if even else QColor(190, 190, 190))
-        painter.end()
-        return QPixmap.fromImage(img)
-
-    def set_image(self, pil_img):
-        disp = pil_img.convert("RGBA")
-        data = disp.tobytes("raw", "RGBA")
-        qimg = QImage(data, disp.width, disp.height, QImage.Format.Format_RGBA8888).copy()
-        pixmap = QPixmap.fromImage(qimg)
-
-        # Show it at a consistent on-screen size, using nearest-neighbor for
-        # small icons so pixels stay crisp instead of blurring.
-        scaled = pixmap.scaled(
-            112, 112, Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.FastTransformation
-        )
-
-        canvas = QPixmap(128, 128)
-        canvas.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(canvas)
-        painter.drawPixmap(0, 0, self.create_checkerboard_pattern())
-        x = (128 - scaled.width()) // 2
-        y = (128 - scaled.height()) // 2
-        painter.drawPixmap(x, y, scaled)
-        painter.end()
-        self.image_label.setPixmap(canvas)
-
-    def clear(self):
-        self.image_label.setPixmap(self.create_checkerboard_pattern())
+def pil_to_pixmap(img):
+    disp = img.convert("RGBA")
+    data = disp.tobytes("raw", "RGBA")
+    qimg = QImage(data, disp.width, disp.height, QImage.Format.Format_RGBA8888).copy()
+    return QPixmap.fromImage(qimg)
 
 
 class IconTab(QWidget):
@@ -98,17 +53,44 @@ class IconTab(QWidget):
         info_group.setLayout(info_layout)
         layout.addWidget(info_group)
 
-        previews_layout = QHBoxLayout()
-        previews_layout.addStretch()
-        self.previews = {}
-        for size in icon_generator.ICON_SIZES:
-            preview = IconPreview(size)
-            self.previews[size] = preview
-            previews_layout.addWidget(preview)
-        previews_layout.addStretch()
-        layout.addLayout(previews_layout)
-
         layout.addStretch()
+
+        # Preview (shown in the main window's preview panel): each icon is
+        # drawn into a CELL x CELL box with nearest-neighbor scaling so pixels stay crisp
+        self.view = ZoomableGraphicsView(pan_with_left=True)
+        self.view.setBackgroundBrush(QBrush(QColor(245, 245, 245)))
+        self.scene = QGraphicsScene(self)
+        self.view.setScene(self.scene)
+        self.preview_widget = self.view
+
+        checker = QBrush(checkerboard_pixmap(8, QColor(225, 225, 225), QColor(190, 190, 190)))
+        border = QPen(QColor(153, 153, 153))
+        border.setCosmetic(True)
+        caption_font = QFont()
+        caption_font.setBold(True)
+
+        self.icon_items = {}
+        x = 0
+        for size in icon_generator.ICON_SIZES:
+            bg = QGraphicsRectItem(x, 0, CELL, CELL)
+            bg.setBrush(checker)
+            bg.setPen(border)
+            self.scene.addItem(bg)
+
+            item = QGraphicsPixmapItem()
+            item.setTransformationMode(Qt.TransformationMode.FastTransformation)
+            item.setPos(x, 0)
+            item.setScale(CELL / size)
+            self.scene.addItem(item)
+            self.icon_items[size] = item
+
+            caption = QGraphicsSimpleTextItem(f"{size} x {size}")
+            caption.setFont(caption_font)
+            caption.setPos(x + (CELL - caption.boundingRect().width()) / 2, CELL + 4)
+            self.scene.addItem(caption)
+            x += CELL + GAP
+
+        self.scene.setSceneRect(QRectF(-GAP / 2, -GAP / 2, x, CELL + CAPTION_H + GAP))
 
     def on_global_files_changed(self):
         valid_file = self.get_valid_file()
@@ -130,7 +112,8 @@ class IconTab(QWidget):
 
             icons, alpha = icon_generator.generate_icons(self.current_pil_img)
             for size, icon_img in icons.items():
-                self.previews[size].set_image(icon_img)
+                self.icon_items[size].setPixmap(pil_to_pixmap(icon_img))
+            self.view.fit_view()
 
             alpha_text = "투명 배경 유지" if alpha else "불투명 (알파 없음)"
             self.status_label.setText(
@@ -143,8 +126,8 @@ class IconTab(QWidget):
     def clear_image(self):
         self.current_pil_img = None
         self.current_file = None
-        for preview in self.previews.values():
-            preview.clear()
+        for item in self.icon_items.values():
+            item.setPixmap(QPixmap())
         self.status_label.setText("이미지를 드래그 앤 드롭하세요")
         self.main_window.set_export_enabled(False)
 

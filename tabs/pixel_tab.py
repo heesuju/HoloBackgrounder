@@ -11,12 +11,7 @@ from PyQt6.QtGui import QImage, QPixmap, QPainter, QColor, QBrush
 
 import pixel_art
 from workers import PixelWorkerThread
-
-class ResizableGraphicsView(QGraphicsView):
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.scene() and not self.scene().sceneRect().isEmpty():
-            self.fitInView(self.scene().sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+from components import ZoomableGraphicsView
 
 class PixelTab(QWidget):
     def __init__(self, main_window):
@@ -45,13 +40,10 @@ class PixelTab(QWidget):
 
         # 1. Controls Section
         settings_group = QGroupBox("픽셀화 설정 (Pixel Art Settings)")
-        settings_layout = QVBoxLayout()
-
-        row1_layout = QHBoxLayout()
+        settings_layout = QFormLayout()
 
         # --- Pixel Size Section ---
-        size_layout = QFormLayout()
-        
+
         self.size_preset_combo = QComboBox()
         self.size_preset_combo.addItem("추천 (자동 계산)", "auto")
         self.size_preset_combo.addItem("16 x 16", 16)
@@ -77,11 +69,9 @@ class PixelTab(QWidget):
         size_controls_layout.addWidget(self.size_preset_combo, 2)
         size_controls_layout.addWidget(self.size_spinbox, 1)
 
-        size_layout.addRow("픽셀 크기:", size_controls_layout)
-        row1_layout.addLayout(size_layout, 1)
+        settings_layout.addRow("픽셀 크기:", size_controls_layout)
 
         # --- Color Quantization Section ---
-        color_layout = QFormLayout()
 
         self.color_preset_combo = QComboBox()
         self.color_preset_combo.addItem("16 색상 (추천)", 16)
@@ -106,28 +96,20 @@ class PixelTab(QWidget):
         color_controls_layout.addWidget(self.color_preset_combo, 2)
         color_controls_layout.addWidget(self.color_spinbox, 1)
 
-        color_layout.addRow("색상 양자화:", color_controls_layout)
-        row1_layout.addLayout(color_layout, 1)
+        settings_layout.addRow("색상 양자화:", color_controls_layout)
 
-        settings_layout.addLayout(row1_layout)
-
-        # --- Row 2: Advanced Options & Export Scale ---
-        row2_layout = QHBoxLayout()
-
+        # --- Advanced Options & Export Scale ---
         self.dither_check = QCheckBox("디더링 적용 (Floyd-Steinberg)")
         self.dither_check.setToolTip("색상 전환부에 레트로 디더링 패턴을 적용합니다.")
         self.dither_check.toggled.connect(self.schedule_update_display)
-        row2_layout.addWidget(self.dither_check)
+        settings_layout.addRow("", self.dither_check)
 
         self.crisp_alpha_check = QCheckBox("투명 배경 깔끔화 (Crisp Alpha)")
         self.crisp_alpha_check.setChecked(True)
         self.crisp_alpha_check.setToolTip("투명 PNG 스프라이트의 외곽선 번짐을 방지하고 깔끔한 픽셀 경계로 다듬습니다.")
         self.crisp_alpha_check.toggled.connect(self.schedule_update_display)
-        row2_layout.addWidget(self.crisp_alpha_check)
+        settings_layout.addRow("", self.crisp_alpha_check)
 
-        row2_layout.addStretch()
-
-        scale_label = QLabel("출력 크기:")
         self.scale_combo = QComboBox()
         self.scale_combo.addItem("원본 해상도로 확대 (Nearest Neighbor)", "original")
         self.scale_combo.addItem("실제 픽셀 해상도 (1x 스프라이트)", "1x")
@@ -135,12 +117,16 @@ class PixelTab(QWidget):
         self.scale_combo.addItem("4배 확대 (4x)", 4)
         self.scale_combo.addItem("8배 확대 (8x)", 8)
         self.scale_combo.setToolTip("내보낼 때 이미지를 원본 크기로 선명하게 확대할지, 실제 저해상도 픽셀 크기로 저장할지 선택합니다.")
-        row2_layout.addWidget(scale_label)
-        row2_layout.addWidget(self.scale_combo)
+        settings_layout.addRow("출력 크기:", self.scale_combo)
 
-        settings_layout.addLayout(row2_layout)
         settings_group.setLayout(settings_layout)
         layout.addWidget(settings_group)
+        layout.addStretch()
+
+        # Preview panel (shown in the main window): toolbar + image view
+        self.preview_widget = QWidget()
+        preview_layout = QVBoxLayout(self.preview_widget)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
 
         # 2. Preview Toolbar (Info & Nav & Compare)
         preview_toolbar = QHBoxLayout()
@@ -159,6 +145,7 @@ class PixelTab(QWidget):
 
         self.preview_info_label = QLabel("이미지를 드래그 앤 드롭하세요")
         self.preview_info_label.setStyleSheet("font-weight: bold; color: #333;")
+        self.preview_info_label.setWordWrap(True)
         preview_toolbar.addWidget(self.preview_info_label, 1)
 
         self.compare_btn = QPushButton("원본 보기 (Hold)")
@@ -169,10 +156,10 @@ class PixelTab(QWidget):
         self.compare_btn.setEnabled(False)
         preview_toolbar.addWidget(self.compare_btn)
 
-        layout.addLayout(preview_toolbar)
+        preview_layout.addLayout(preview_toolbar)
 
         # 3. Graphics View with Checkerboard
-        self.view = ResizableGraphicsView()
+        self.view = ZoomableGraphicsView(pan_with_left=True)
         self.scene = QGraphicsScene(self)
         self.view.setScene(self.scene)
         self.pixmap_item = QGraphicsPixmapItem()
@@ -180,7 +167,7 @@ class PixelTab(QWidget):
 
         bg_pixmap = self.create_checkerboard_pattern()
         self.view.setBackgroundBrush(QBrush(bg_pixmap))
-        layout.addWidget(self.view)
+        preview_layout.addWidget(self.view)
 
     def create_checkerboard_pattern(self):
         size = 16
@@ -241,6 +228,7 @@ class PixelTab(QWidget):
             self.compare_btn.setEnabled(True)
 
             self.update_display()
+            self.view.fit_view()
         except Exception as e:
             QMessageBox.warning(self, "오류", f"이미지 로드 실패 ({os.path.basename(file_path)}): {e}")
 
@@ -355,7 +343,6 @@ class PixelTab(QWidget):
 
             self.scene.setSceneRect(0, 0, self.processed_qimage.width(), self.processed_qimage.height())
             self.pixmap_item.setPixmap(QPixmap.fromImage(self.processed_qimage))
-            self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
             # Update info label
             orig_w, orig_h = self.current_pil_img.size

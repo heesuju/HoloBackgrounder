@@ -9,11 +9,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLa
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage, QPixmap, QColor, QBrush, QPainter
 
-class ResizableGraphicsView(QGraphicsView):
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.scene() and not self.scene().sceneRect().isEmpty():
-            self.fitInView(self.scene().sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+from components import ZoomableGraphicsView
 
 class OutlineTab(QWidget):
     def __init__(self, main_window):
@@ -93,8 +89,10 @@ class OutlineTab(QWidget):
         controls_group.setLayout(controls_layout)
         layout.addWidget(controls_group)
 
-        # Image View
-        self.view = ResizableGraphicsView()
+        layout.addStretch()
+
+        # Image View (shown in the main window's preview panel)
+        self.view = ZoomableGraphicsView(pan_with_left=True)
         self.scene = QGraphicsScene(self)
         self.view.setScene(self.scene)
         self.pixmap_item = QGraphicsPixmapItem()
@@ -103,7 +101,7 @@ class OutlineTab(QWidget):
         # Checkerboard background
         bg_pixmap = self.create_checkerboard_pattern()
         self.view.setBackgroundBrush(QBrush(bg_pixmap))
-        layout.addWidget(self.view)
+        self.preview_widget = self.view
 
     def create_checkerboard_pattern(self):
         size = 20
@@ -153,7 +151,7 @@ class OutlineTab(QWidget):
                 self.main_window.set_export_enabled(True)
                 
                 self.update_display()
-                self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+                self.view.fit_view()
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to load image: {e}")
 

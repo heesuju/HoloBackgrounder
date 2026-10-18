@@ -8,16 +8,7 @@ from PyQt6.QtCore import Qt, QRectF, QRect
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QBrush
 
 from workers import CropWorkerThread
-
-class ResizableGraphicsView(QGraphicsView):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.setMouseTracking(True)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.scene() and not self.scene().sceneRect().isEmpty():
-            self.fitInView(self.scene().sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+from components import ZoomableGraphicsView
 
 class ResizableCropRect(QGraphicsRectItem):
     def __init__(self, scene):
@@ -28,14 +19,20 @@ class ResizableCropRect(QGraphicsRectItem):
         pen = QPen(QColor(255, 0, 0))
         pen.setWidth(2)
         pen.setStyle(Qt.PenStyle.DashLine)
+        pen.setCosmetic(True)
         self.setPen(pen)
         self.setBrush(QBrush(QColor(255, 0, 0, 50)))
         self.setZValue(1)
-        
-        self.handle_size = 10
+
         self.active_handle = None
         self.dragging_center = False
         self.drag_offset = None
+
+    def handle_size(self):
+        # Keep handles ~10 screen px regardless of zoom
+        views = self.scene_ref.views()
+        scale = views[0].transform().m11() if views else 1.0
+        return 10 / scale if scale > 0 else 10
 
     def hoverMoveEvent(self, event):
         handle = self.get_handle_at(event.pos())
@@ -59,7 +56,7 @@ class ResizableCropRect(QGraphicsRectItem):
 
     def get_handle_at(self, pos):
         r = self.rect()
-        s = self.handle_size
+        s = self.handle_size()
         handles = {
             'tl': QRectF(r.left() - s/2, r.top() - s/2, s, s),
             't':  QRectF(r.center().x() - s/2, r.top() - s/2, s, s),
@@ -81,9 +78,11 @@ class ResizableCropRect(QGraphicsRectItem):
         if r.isEmpty():
             return
             
-        s = self.handle_size
+        s = self.handle_size()
         painter.setBrush(QBrush(QColor(255, 255, 255)))
-        painter.setPen(QPen(QColor(0, 0, 0)))
+        pen = QPen(QColor(0, 0, 0))
+        pen.setCosmetic(True)
+        painter.setPen(pen)
         
         handles = [
             QRectF(r.left() - s/2, r.top() - s/2, s, s),
@@ -292,7 +291,15 @@ class CropTab(QWidget):
         inst_label = QLabel("Drag a rectangle over the image to define the crop area. All dragged files will be cropped to this exact position and size.")
         inst_label.setWordWrap(True)
         inst_layout.addWidget(inst_label)
-        
+        instructions_group.setLayout(inst_layout)
+        layout.addWidget(instructions_group)
+        layout.addStretch()
+
+        # Preview panel (shown in the main window): navigation + image view
+        self.preview_widget = QWidget()
+        preview_layout = QVBoxLayout(self.preview_widget)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+
         # Navigation
         nav_layout = QHBoxLayout()
         self.prev_btn = QPushButton("< Previous")
@@ -309,12 +316,11 @@ class CropTab(QWidget):
         self.next_btn.setEnabled(False)
         nav_layout.addWidget(self.next_btn)
         
-        inst_layout.addLayout(nav_layout)
-        instructions_group.setLayout(inst_layout)
-        layout.addWidget(instructions_group)
+        preview_layout.addLayout(nav_layout)
 
         # Image View
-        self.view = ResizableGraphicsView()
+        self.view = ZoomableGraphicsView()
+        self.view.setMouseTracking(True)
         self.scene = CropScene(self)
         self.view.setScene(self.scene)
         self.pixmap_item = QGraphicsPixmapItem()
@@ -323,7 +329,7 @@ class CropTab(QWidget):
         # Checkerboard background
         bg_pixmap = self.create_checkerboard_pattern()
         self.view.setBackgroundBrush(QBrush(bg_pixmap))
-        layout.addWidget(self.view)
+        preview_layout.addWidget(self.view)
 
     def create_checkerboard_pattern(self):
         size = 20
@@ -383,7 +389,7 @@ class CropTab(QWidget):
                 
                 self.main_window.set_export_enabled(True)
                 
-                self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+                self.view.fit_view()
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to load preview image: {e}")
 

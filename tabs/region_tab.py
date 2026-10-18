@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QRectF, QPointF
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QBrush
 
-from components import DragDropLabel
+from components import DragDropLabel, ZoomableGraphicsView
 import image_resizer
 import region_swap
 
@@ -30,13 +30,6 @@ def checkerboard_pixmap(size=20):
     painter.fillRect(size, size, size, size, QColor(200, 200, 200))
     painter.end()
     return QPixmap.fromImage(img)
-
-
-class FitView(QGraphicsView):
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.scene() and not self.scene().sceneRect().isEmpty():
-            self.fitInView(self.scene().sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
 
 class SquareRegionItem(QGraphicsRectItem):
@@ -272,14 +265,13 @@ class RegionTab(QWidget):
         info_group.setLayout(info_layout)
         layout.addWidget(info_group)
 
-        # Preview
-        self.view = FitView()
+        # Preview (shown in the main window's preview panel)
+        self.view = ZoomableGraphicsView()
         self.view.setMouseTracking(True)
         self.view.setBackgroundBrush(QBrush(checkerboard_pixmap()))
-        self.view.setMinimumHeight(220)
         self.scene = RegionScene(self)
         self.view.setScene(self.scene)
-        layout.addWidget(self.view, 1)
+        self.preview_widget = self.view
 
         # Region
         region_group = QGroupBox("영역 (px)")
@@ -340,6 +332,7 @@ class RegionTab(QWidget):
 
         self.result_label = QLabel("")
         layout.addWidget(self.result_label)
+        layout.addStretch()
 
     # --- region sync ---
     def current_region(self):
@@ -434,7 +427,7 @@ class RegionTab(QWidget):
         w, h = img.size
         self.scene.setSceneRect(0, 0, w, h)
         self.scene.pixmap_item.setPixmap(pil_to_pixmap(img))
-        self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self.view.fit_view()
 
         if prev_region is None:
             # Default: largest centered square
