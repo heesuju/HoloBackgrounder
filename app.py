@@ -35,22 +35,12 @@ class MainWindow(QMainWindow):
         input_group = QGroupBox("Global Input Files (Drag & Drop)")
         input_layout = QVBoxLayout()
         
-        self.drop_label = MultiDragDropLabel(text="Drag and Drop multiple files here\nor\nClick 'Browse' to select")
+        self.drop_label = MultiDragDropLabel(text="Drag and Drop multiple files here\nor\nClick to browse")
         self.drop_label.filesDropped.connect(self.on_files_dropped)
+        self.drop_label.clicked.connect(self.browse_files)
+        self.drop_label.removeRequested.connect(self.remove_file)
         input_layout.addWidget(self.drop_label)
 
-        btn_layout = QHBoxLayout()
-        browse_btn = QPushButton("Browse Files")
-        browse_btn.clicked.connect(self.browse_files)
-        btn_layout.addWidget(browse_btn)
-        
-        self.clear_btn = QPushButton("Clear Files")
-        self.clear_btn.clicked.connect(self.clear_files)
-        self.clear_btn.setEnabled(False)
-        btn_layout.addWidget(self.clear_btn)
-        
-        input_layout.addLayout(btn_layout)
-        
         self.file_path_label = QLabel("No files selected")
         self.file_path_label.setWordWrap(True)
         input_layout.addWidget(self.file_path_label)
@@ -155,29 +145,24 @@ class MainWindow(QMainWindow):
         
         self.current_files = sorted(file_paths, key=lambda x: natural_keys(os.path.basename(x)))
         self.file_path_label.setText(f"Selected: {len(self.current_files)} files")
-        self.clear_btn.setEnabled(True)
-        self.drop_label.setText(f"{len(self.current_files)} Files Selected")
-        self.drop_label.setStyleSheet("border-color: #55cc55; background-color: #e0ffe0; color: #005500; border-style: solid;")
+        self.drop_label.set_files(self.current_files)
+        self.notify_tabs()
+
+    def remove_file(self, index):
+        if not (0 <= index < len(self.current_files)):
+            return
+        del self.current_files[index]
+        if not self.current_files:
+            self.clear_files()
+            return
+        self.file_path_label.setText(f"Selected: {len(self.current_files)} files")
+        self.drop_label.set_files(self.current_files)
         self.notify_tabs()
 
     def clear_files(self):
         self.current_files = []
         self.file_path_label.setText("No files selected")
-        self.clear_btn.setEnabled(False)
-        self.drop_label.setText("Drag and Drop multiple files here\nor\nClick 'Browse' to select")
-        self.drop_label.setStyleSheet("""
-            QLabel {
-                border: 2px dashed #aaa;
-                border-radius: 10px;
-                padding: 20px;
-                background-color: #f0f0f0;
-                color: #555;
-            }
-            QLabel:hover {
-                border-color: #55aaff;
-                background-color: #e0f0ff;
-            }
-        """)
+        self.drop_label.clear_files()
         self.notify_tabs()
 
     def browse_files(self):

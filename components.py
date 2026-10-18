@@ -1,6 +1,7 @@
+import os
 from PyQt6.QtWidgets import QLabel, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QImage, QPixmap, QPainter, QColor, QBrush
+from PyQt6.QtCore import Qt, pyqtSignal, QRect
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QImage, QPixmap, QPainter, QColor, QBrush, QPen
 
 
 def checkerboard_pixmap(size=20, light=QColor(200, 200, 200), dark=QColor(150, 150, 150)):
@@ -175,18 +176,36 @@ class DragDropLabel(QLabel):
                 self.fileDropped.emit(file_path)
 
 class MultiDragDropLabel(QLabel):
+    """Fixed-height drop area. Shows the prompt text when empty and a row of
+    thumbnails of the selected files otherwise, without changing size.
+    Clicking the area emits clicked; the x on a thumbnail emits removeRequested(index)."""
+
     filesDropped = pyqtSignal(list)
+    clicked = pyqtSignal()
+    removeRequested = pyqtSignal(int)
+
+    HEIGHT = 130
+    MAX_THUMBS = 24     # thumbnails are only loaded for the first files
+    THUMB_GAP = 6
+    CLOSE_SIZE = 18
 
     def __init__(self, text="Drag and Drop multiple files here", file_types=None, parent=None):
         super().__init__(parent)
+        self.prompt_text = text
         self.setText(text)
         self.file_types = file_types or []
+        self.files = []
+        self.thumb_cache = {}   # path -> QPixmap, or None for files that aren't images
+        self.close_rects = []   # (QRect, file index) of the x buttons, set while painting
+        self.hover_close = None
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setFixedHeight(self.HEIGHT)
+        self.setMinimumWidth(1)
         self.setStyleSheet("""
             QLabel {
                 border: 2px dashed #aaa;
                 border-radius: 10px;
-                padding: 20px;
+                padding: 8px;
                 background-color: #f0f0f0;
                 color: #555;
             }
@@ -194,8 +213,139 @@ class MultiDragDropLabel(QLabel):
                 border-color: #55aaff;
                 background-color: #e0f0ff;
             }
+            QLabel[hasFiles="true"] {
+                border: 2px solid #55cc55;
+                background-color: #e0ffe0;
+            }
         """)
         self.setAcceptDrops(True)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._checker = QBrush(checkerboard_pixmap(6, QColor(235, 235, 235), QColor(205, 205, 205)))
+
+    def set_files(self, file_paths):
+        self.files = list(file_paths)
+        thumb_px = self.HEIGHT * 2
+        cache = {}
+        for path in self.files[:self.MAX_THUMBS]:
+            if path in self.thumb_cache:
+                cache[path] = self.thumb_cache[path]
+                continue
+            img = QImage(path)
+            cache[path] = None if img.isNull() else QPixmap.fromImage(img.scaled(
+                thumb_px, thumb_px, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation))
+        self.thumb_cache = cache
+        self.hover_close = None
+        self.setText("" if self.files else self.prompt_text)
+        self._set_has_files(bool(self.files))
+
+    def clear_files(self):
+        self.set_files([])
+
+    def _set_has_files(self, value):
+        self.setProperty("hasFiles", value)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        self.close_rects = []
+        if not self.files:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        area = self.contentsRect()
+        side = area.height()
+        gap = self.THUMB_GAP
+        fit = max(1, (area.width() + gap) // (side + gap))
+        total = len(self.files)
+        shown = min(total, fit, self.MAX_THUMBS)
+        overflow = total - shown
+        if overflow > 0 and shown == fit:
+            shown -= 1          # last slot shows "+N"
+            overflow += 1
+
+        slots = shown + (1 if overflow > 0 else 0)
+        x = area.left() + (area.width() - (slots * side + (slots - 1) * gap)) // 2
+        y = area.top()
+        for i in range(shown):
+            box = QRect(x, y, side, side)
+            pix = self.thumb_cache.get(self.files[i])
+            painter.fillRect(box, self._checker)
+            if pix is not None:
+                scaled = pix.size().scaled(side, side, Qt.AspectRatioMode.KeepAspectRatio)
+                target = QRect(0, 0, scaled.width(), scaled.height())
+                target.moveCenter(box.center())
+                painter.drawPixmap(target, pix)
+            else:
+                ext = os.path.splitext(self.files[i])[1].upper().lstrip('.') or "FILE"
+                painter.setPen(QColor(85, 85, 85))
+                painter.drawText(box, Qt.AlignmentFlag.AlignCenter, ext)
+            painter.setPen(QColor(170, 170, 170))
+            painter.drawRect(box.adjusted(0, 0, -1, -1))
+            self.draw_close_button(painter, box, i)
+            x += side + gap
+        if overflow > 0:
+            box = QRect(x, y, side, side)
+            painter.fillRect(box, QColor(0, 0, 0, 30))
+            painter.setPen(QColor(60, 60, 60))
+            font = painter.font()
+            font.setBold(True)
+            font.setPointSize(font.pointSize() + 4)
+            painter.setFont(font)
+            painter.drawText(box, Qt.AlignmentFlag.AlignCenter, f"+{overflow}")
+            painter.setFont(self.font())
+        painter.end()
+
+    def draw_close_button(self, painter, box, index):
+        s = self.CLOSE_SIZE
+        rect = QRect(box.right() - s - 2, box.top() + 2, s, s)
+        self.close_rects.append((rect, index))
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(220, 50, 50) if self.hover_close == index else QColor(0, 0, 0, 150))
+        painter.drawEllipse(rect)
+        pen = QPen(QColor(255, 255, 255), 2)
+        painter.setPen(pen)
+        m = 5
+        painter.drawLine(rect.left() + m, rect.top() + m, rect.right() - m + 1, rect.bottom() - m + 1)
+        painter.drawLine(rect.right() - m + 1, rect.top() + m, rect.left() + m, rect.bottom() - m + 1)
+        painter.restore()
+
+    def close_index_at(self, pos):
+        for rect, index in self.close_rects:
+            if rect.contains(pos):
+                return index
+        return None
+
+    def mouseMoveEvent(self, event):
+        index = self.close_index_at(event.position().toPoint())
+        if index != self.hover_close:
+            self.hover_close = index
+            self.setToolTip("Remove" if index is not None else "")
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        if self.hover_close is not None:
+            self.hover_close = None
+            self.update()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            index = self.close_index_at(event.position().toPoint())
+            if index is not None:
+                self.removeRequested.emit(index)
+            else:
+                self.clicked.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
