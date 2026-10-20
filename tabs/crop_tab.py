@@ -414,6 +414,10 @@ class CropTab(QWidget):
         offset_layout.addWidget(self.y_spin)
         form.addRow("Offset:", offset_layout)
 
+        self.center_check = QCheckBox("Center (per image on export)")
+        self.center_check.toggled.connect(self.on_center_toggled)
+        form.addRow("", self.center_check)
+
         self.width_spin = QSpinBox()
         self.height_spin = QSpinBox()
         for spin, dim in ((self.width_spin, "width"), (self.height_spin, "height")):
@@ -501,7 +505,11 @@ class CropTab(QWidget):
         img_w, img_h = self.image_size()
         w = min(max(1, int(round(w))), img_w)
         h = min(max(1, int(round(h))), img_h)
-        x, y = top_left if top_left else (cx - w / 2, cy - h / 2)
+        if self.center_check.isChecked():
+            # Same formula the export worker uses per image
+            x, y = (img_w - w) // 2, (img_h - h) // 2
+        else:
+            x, y = top_left if top_left else (cx - w / 2, cy - h / 2)
         x = max(0, min(round(x), img_w - w))
         y = max(0, min(round(y), img_h - h))
         return QRectF(x, y, w, h)
@@ -595,6 +603,13 @@ class CropTab(QWidget):
         else:
             self.set_crop_rect(size[0] / 2, size[1] / 2, w, h, drive=dim)
 
+    def on_center_toggled(self, checked):
+        self.x_spin.setEnabled(not checked)
+        self.y_spin.setEnabled(not checked)
+        rect = self.current_crop_rect()
+        if checked and rect is not None:
+            self.set_crop_rect(0, 0, rect.width(), rect.height())
+
     def on_offset_changed(self, _value):
         size = self.image_size()
         if not size:
@@ -671,6 +686,9 @@ class CropTab(QWidget):
                     spin.blockSignals(True)
                     spin.setMaximum(limit)
                     spin.blockSignals(False)
+                rect = self.current_crop_rect()
+                if self.center_check.isChecked() and rect is not None:
+                    self.set_crop_rect(0, 0, rect.width(), rect.height())
                 
                 self.main_window.set_export_enabled(True)
                 
@@ -712,7 +730,8 @@ class CropTab(QWidget):
         override_name = self.main_window.override_name_input.text()
         start_index = self.main_window.start_index_input.value()
 
-        self.crop_thread = CropWorkerThread(valid_files, output_dir, crop_rect, override_name, start_index)
+        self.crop_thread = CropWorkerThread(valid_files, output_dir, crop_rect, override_name, start_index,
+                                            center=self.center_check.isChecked())
         self.crop_thread.finished.connect(self.on_crop_finished)
         self.crop_thread.progress.connect(self.update_crop_status)
         

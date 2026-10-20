@@ -107,11 +107,12 @@ class CropWorkerThread(QThread):
     finished = pyqtSignal(bool, str)
     progress = pyqtSignal(str)
 
-    def __init__(self, file_paths, output_dir, crop_rect, override_name, start_index):
+    def __init__(self, file_paths, output_dir, crop_rect, override_name, start_index, center=False):
         super().__init__()
         self.file_paths = file_paths
         self.output_dir = output_dir
         self.crop_rect = crop_rect # (x, y, w, h)
+        self.center = center # if True, ignore x/y and center the crop on each image
         self.override_name = override_name
         self.start_index = start_index
 
@@ -126,7 +127,10 @@ class CropWorkerThread(QThread):
             for idx, file_path in enumerate(self.file_paths):
                 try:
                     img = Image.open(file_path)
-                    
+                    if self.center:
+                        x = (img.width - w) // 2
+                        y = (img.height - h) // 2
+
                     # Ensure coordinates are within bounds (optional, but PIL crop handles it mostly)
                     cropped_img = img.crop((x, y, x + w, y + h))
                     
