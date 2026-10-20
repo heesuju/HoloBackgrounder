@@ -1,5 +1,5 @@
 import sys
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QGroupBox,
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
                              QFormLayout, QLineEdit, QSpinBox, QPushButton, QLabel, QFileDialog,
                              QSplitter, QStackedWidget, QListWidget, QListWidgetItem)
 from PyQt6.QtCore import Qt
@@ -86,10 +86,18 @@ class MainWindow(QMainWindow):
         self.drop_label.removeRequested.connect(self.remove_file)
         input_layout.addWidget(self.drop_label)
 
+        footer_layout = QHBoxLayout()
         self.file_path_label = QLabel("No files selected")
         self.file_path_label.setWordWrap(True)
-        input_layout.addWidget(self.file_path_label)
-        
+        footer_layout.addWidget(self.file_path_label, 1)
+
+        self.clear_btn = QPushButton("Clear")
+        self.clear_btn.setToolTip("Remove all input files")
+        self.clear_btn.clicked.connect(self.clear_files)
+        self.clear_btn.setEnabled(False)
+        footer_layout.addWidget(self.clear_btn)
+        input_layout.addLayout(footer_layout)
+
         input_group.setLayout(input_layout)
         main_layout.addWidget(input_group)
         
@@ -235,6 +243,7 @@ class MainWindow(QMainWindow):
         self.on_files_changed()
 
     def on_files_changed(self):
+        self.clear_btn.setEnabled(bool(self.current_files))
         # Switching tools already notifies the newly selected tool
         if not self.update_tool_availability():
             self.notify_tabs()
