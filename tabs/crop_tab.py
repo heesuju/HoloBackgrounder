@@ -3,12 +3,56 @@ from PIL import Image
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
                              QFileDialog, QGroupBox, QMessageBox, QGraphicsRectItem,
-                             QGraphicsItem)
+                             QGraphicsItem, QFormLayout, QComboBox, QSpinBox, QCheckBox)
 from PyQt6.QtCore import Qt, QRectF, QRect
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QBrush
 
 from workers import CropWorkerThread
 from components import ZoomableGraphicsView
+
+# (label, (w, h)); None = free, "original" = current image's aspect ratio
+RATIO_PRESETS = [
+    ("Free", None),
+    ("Original", "original"),
+    ("1:1", (1, 1)),
+    ("4:3", (4, 3)),
+    ("3:4", (3, 4)),
+    ("3:2", (3, 2)),
+    ("2:3", (2, 3)),
+    ("16:9", (16, 9)),
+    ("9:16", (9, 16)),
+    ("4:5", (4, 5)),
+    ("5:4", (5, 4)),
+    ("21:9", (21, 9)),
+]
+
+
+def fit_ratio(w, h, ratio, max_w, max_h):
+    """Grow (w, h) to the given ratio along the larger side, then shrink to fit max_w x max_h."""
+    if h <= 0 or w / h > ratio:
+        h = w / ratio
+    else:
+        w = h * ratio
+    if w > max_w:
+        w = max_w
+        h = w / ratio
+    if h > max_h:
+        h = max_h
+        w = h * ratio
+    return w, h
+
+
+def anchored_ratio_rect(ax, ay, px, py, ratio, bounds):
+    """Ratio-locked rect spanning from anchor (ax, ay) toward point (px, py), clamped to bounds."""
+    sx = 1 if px >= ax else -1
+    sy = 1 if py >= ay else -1
+    max_w = (bounds.right() - ax) if sx > 0 else (ax - bounds.left())
+    max_h = (bounds.bottom() - ay) if sy > 0 else (ay - bounds.top())
+    w, h = fit_ratio(abs(px - ax), abs(py - ay), ratio, max_w, max_h)
+    x = ax if sx > 0 else ax - w
+    y = ay if sy > 0 else ay - h
+    return QRectF(x, y, w, h)
+
 
 class ResizableCropRect(QGraphicsRectItem):
     def __init__(self, scene):
@@ -108,8 +152,41 @@ class ResizableCropRect(QGraphicsRectItem):
         else:
             super().mousePressEvent(event)
             
+    def ratio_resize(self, pos, ratio):
+        r = self.rect()
+        b = self.scene_ref.sceneRect()
+        h = self.active_handle
+        if len(h) == 2:
+            # Corner: opposite corner stays fixed
+            ax = r.right() if 'l' in h else r.left()
+            ay = r.bottom() if 't' in h else r.top()
+            return anchored_ratio_rect(ax, ay, pos.x(), pos.y(), ratio, b)
+        if h in ('t', 'b'):
+            # Edge: opposite edge stays fixed, width follows centered
+            ay = r.bottom() if h == 't' else r.top()
+            cx = r.center().x()
+            new_h = max(0, (ay - pos.y()) if h == 't' else (pos.y() - ay))
+            max_h = (ay - b.top()) if h == 't' else (b.bottom() - ay)
+            max_w = 2 * min(cx - b.left(), b.right() - cx)
+            w, new_h = fit_ratio(0, new_h, ratio, max_w, max_h)
+            y = ay - new_h if h == 't' else ay
+            return QRectF(cx - w / 2, y, w, new_h)
+        ax = r.right() if h == 'l' else r.left()
+        cy = r.center().y()
+        new_w = max(0, (ax - pos.x()) if h == 'l' else (pos.x() - ax))
+        max_w = (ax - b.left()) if h == 'l' else (b.right() - ax)
+        max_h = 2 * min(cy - b.top(), b.bottom() - cy)
+        new_w, hh = fit_ratio(new_w, 0, ratio, max_w, max_h)
+        x = ax - new_w if h == 'l' else ax
+        return QRectF(x, cy - hh / 2, new_w, hh)
+
     def mouseMoveEvent(self, event):
-        if self.active_handle:
+        ratio = self.scene_ref.tab.locked_ratio()
+        if self.active_handle and ratio:
+            self.setRect(self.ratio_resize(event.pos(), ratio))
+            self.scene_ref.update_current_rect()
+            event.accept()
+        elif self.active_handle:
             pos = event.pos()
             r = self.rect()
             
@@ -154,8 +231,11 @@ class ResizableCropRect(QGraphicsRectItem):
             super().mouseMoveEvent(event)
             
     def mouseReleaseEvent(self, event):
+        was_editing = self.active_handle or self.dragging_center
         self.active_handle = None
         self.dragging_center = False
+        if was_editing:
+            self.scene_ref.snap_rect()
         self.scene_ref.update_current_rect()
         super().mouseReleaseEvent(event)
 
@@ -194,13 +274,20 @@ class CropScene(QGraphicsScene):
     def mouseMoveEvent(self, event):
         if self.is_dragging:
             current_pos = event.scenePos()
-            # Constrain within scene bounds
-            x1 = max(0, min(self.start_pos.x(), current_pos.x()))
-            y1 = max(0, min(self.start_pos.y(), current_pos.y()))
-            x2 = min(self.width(), max(self.start_pos.x(), current_pos.x()))
-            y2 = min(self.height(), max(self.start_pos.y(), current_pos.y()))
-            
-            self.rect_item.setRect(QRectF(x1, y1, x2 - x1, y2 - y1))
+            ratio = self.tab.locked_ratio()
+            if ratio:
+                self.rect_item.setRect(anchored_ratio_rect(
+                    self.start_pos.x(), self.start_pos.y(),
+                    current_pos.x(), current_pos.y(), ratio, self.sceneRect()))
+            else:
+                # Constrain within scene bounds
+                x1 = max(0, min(self.start_pos.x(), current_pos.x()))
+                y1 = max(0, min(self.start_pos.y(), current_pos.y()))
+                x2 = min(self.width(), max(self.start_pos.x(), current_pos.x()))
+                y2 = min(self.height(), max(self.start_pos.y(), current_pos.y()))
+
+                self.rect_item.setRect(QRectF(x1, y1, x2 - x1, y2 - y1))
+            self.tab.sync_size_inputs()
             
         if self.tab.original_img:
             pos = event.scenePos()
@@ -259,16 +346,25 @@ class CropScene(QGraphicsScene):
     def mouseReleaseEvent(self, event):
         if self.is_dragging:
             self.is_dragging = False
+            self.snap_rect()
             self.update_current_rect()
         super().mouseReleaseEvent(event)
 
+    def snap_rect(self):
+        """Round the crop rect to whole pixels so it matches the exported size exactly."""
+        r = self.rect_item.rect()
+        if r.width() < 1 or r.height() < 1:
+            return
+        self.tab.set_crop_rect(r.center().x(), r.center().y(), r.width(), r.height())
+
     def update_current_rect(self):
         rect = self.rect_item.rect()
-        if rect.width() > 0 and rect.height() > 0:
+        if rect.width() >= 1 and rect.height() >= 1:
             self.current_rect = rect
         else:
             self.rect_item.hide()
             self.current_rect = None
+        self.tab.sync_size_inputs()
 
 class CropTab(QWidget):
     def __init__(self, main_window):
@@ -288,12 +384,47 @@ class CropTab(QWidget):
         # Instructions
         instructions_group = QGroupBox("Instructions")
         inst_layout = QVBoxLayout()
-        inst_label = QLabel("Drag a rectangle over the image to define the crop area. All dragged files will be cropped to this exact position and size.")
+        inst_label = QLabel("Drag a rectangle over the image to define the crop area, or pick a ratio / enter a size below. All dragged files will be cropped to this exact position and size.")
         inst_label.setWordWrap(True)
         inst_layout.addWidget(inst_label)
         instructions_group.setLayout(inst_layout)
         layout.addWidget(instructions_group)
+
+        # Crop size settings
+        settings_group = QGroupBox("Crop Size")
+        form = QFormLayout()
+
+        self.ratio_combo = QComboBox()
+        for label, value in RATIO_PRESETS:
+            self.ratio_combo.addItem(label, value)
+        self.ratio_combo.currentIndexChanged.connect(self.on_ratio_changed)
+        form.addRow("Ratio:", self.ratio_combo)
+
+        self.width_spin = QSpinBox()
+        self.height_spin = QSpinBox()
+        for spin, dim in ((self.width_spin, "width"), (self.height_spin, "height")):
+            spin.setRange(1, 32768)
+            spin.setSuffix(" px")
+            # Apply on Enter / focus out / arrows, not on every keystroke
+            spin.setKeyboardTracking(False)
+            spin.valueChanged.connect(lambda v, d=dim: self.on_size_changed(d, v))
+        dims_layout = QHBoxLayout()
+        dims_layout.addWidget(QLabel("W"))
+        dims_layout.addWidget(self.width_spin)
+        dims_layout.addWidget(QLabel("H"))
+        dims_layout.addWidget(self.height_spin)
+        form.addRow("Size:", dims_layout)
+
+        self.lock_check = QCheckBox("Lock ratio")
+        self.lock_check.toggled.connect(self.on_lock_toggled)
+        form.addRow("", self.lock_check)
+
+        settings_group.setLayout(form)
+        layout.addWidget(settings_group)
         layout.addStretch()
+
+        # Ratio captured when "Lock ratio" is checked while the ratio is "Free"
+        self.custom_ratio = None
 
         # Preview panel (shown in the main window): navigation + image view
         self.preview_widget = QWidget()
@@ -330,6 +461,123 @@ class CropTab(QWidget):
         bg_pixmap = self.create_checkerboard_pattern()
         self.view.setBackgroundBrush(QBrush(bg_pixmap))
         preview_layout.addWidget(self.view)
+
+    def image_size(self):
+        if self.original_img is None or self.original_img.isNull():
+            return None
+        return self.original_img.width(), self.original_img.height()
+
+    def current_crop_rect(self):
+        return self.scene.current_rect if self.scene.rect_item.isVisible() else None
+
+    def locked_ratio(self):
+        """Width / height ratio the crop rect must keep, or None when free."""
+        if not self.lock_check.isChecked():
+            return None
+        value = self.ratio_combo.currentData()
+        if value is None:
+            return self.custom_ratio
+        if value == "original":
+            size = self.image_size()
+            return size[0] / size[1] if size else None
+        return value[0] / value[1]
+
+    def clamped_rect(self, cx, cy, w, h):
+        """Whole-pixel rect of size w x h centered near (cx, cy), kept inside the image."""
+        img_w, img_h = self.image_size()
+        w = min(max(1, int(round(w))), img_w)
+        h = min(max(1, int(round(h))), img_h)
+        x = max(0, min(round(cx - w / 2), img_w - w))
+        y = max(0, min(round(cy - h / 2), img_h - h))
+        return QRectF(x, y, w, h)
+
+    def set_crop_rect(self, cx, cy, w, h, drive="width"):
+        """Place a w x h crop rect around (cx, cy); when locked, the non-driving side follows the ratio."""
+        ratio = self.locked_ratio()
+        if ratio:
+            img_w, img_h = self.image_size()
+            w, h = fit_ratio(w, h, ratio, img_w, img_h)
+            if drive == "width" and round(w) / ratio <= img_h:
+                w = max(1, round(w))
+                h = w / ratio
+            elif round(h) * ratio <= img_w:
+                h = max(1, round(h))
+                w = h * ratio
+        self.scene.rect_item.setRect(self.clamped_rect(cx, cy, w, h))
+        self.scene.rect_item.show()
+        self.scene.update_current_rect()
+
+    def sync_size_inputs(self):
+        rect = self.scene.rect_item.rect() if self.scene.rect_item.isVisible() else None
+        if rect is None or rect.width() < 1 or rect.height() < 1:
+            return
+        for spin, value in ((self.width_spin, rect.width()), (self.height_spin, rect.height())):
+            spin.blockSignals(True)
+            spin.setValue(max(1, round(value)))
+            spin.blockSignals(False)
+
+    def on_ratio_changed(self, _index):
+        is_free = self.ratio_combo.currentData() is None
+        self.lock_check.blockSignals(True)
+        self.lock_check.setChecked(not is_free)
+        self.lock_check.blockSignals(False)
+        self.custom_ratio = None
+        if not is_free:
+            self.apply_ratio()
+
+    def on_lock_toggled(self, checked):
+        if checked:
+            if self.ratio_combo.currentData() is None:
+                rect = self.current_crop_rect()
+                size = self.image_size()
+                if rect is not None:
+                    self.custom_ratio = rect.width() / rect.height()
+                elif size:
+                    self.custom_ratio = size[0] / size[1]
+                else:
+                    self.custom_ratio = self.width_spin.value() / self.height_spin.value()
+        else:
+            # Unlocking makes the ratio free again
+            self.ratio_combo.blockSignals(True)
+            self.ratio_combo.setCurrentIndex(0)
+            self.ratio_combo.blockSignals(False)
+            self.custom_ratio = None
+
+    def apply_ratio(self):
+        """Reshape the crop rect to the locked ratio, keeping its center and width where possible."""
+        size = self.image_size()
+        ratio = self.locked_ratio()
+        if not size or not ratio:
+            return
+        img_w, img_h = size
+        rect = self.current_crop_rect()
+        if rect is not None:
+            cx, cy = rect.center().x(), rect.center().y()
+            w = rect.width()
+        else:
+            # No selection yet: largest centered rect with this ratio
+            cx, cy = img_w / 2, img_h / 2
+            w = img_w
+        self.set_crop_rect(cx, cy, w, 0)
+
+    def on_size_changed(self, dim, _value):
+        size = self.image_size()
+        if not size:
+            return
+        ratio = self.locked_ratio()
+        w, h = self.width_spin.value(), self.height_spin.value()
+        if ratio:
+            # Drop the other side so the edited one drives the ratio fit
+            if dim == "width":
+                h = 0
+            else:
+                w = 0
+        rect = self.current_crop_rect()
+        if rect is not None:
+            cx, cy = rect.center().x(), rect.center().y()
+        else:
+            cx, cy = size[0] / 2, size[1] / 2
+        self.set_crop_rect(cx, cy, w, h, drive=dim)
 
     def create_checkerboard_pattern(self):
         size = 20
@@ -386,6 +634,10 @@ class CropTab(QWidget):
                 
                 self.scene.setSceneRect(0, 0, w, h)
                 self.pixmap_item.setPixmap(QPixmap.fromImage(self.original_img))
+                for spin, limit in ((self.width_spin, w), (self.height_spin, h)):
+                    spin.blockSignals(True)
+                    spin.setMaximum(limit)
+                    spin.blockSignals(False)
                 
                 self.main_window.set_export_enabled(True)
                 
@@ -418,10 +670,10 @@ class CropTab(QWidget):
             return
 
         rect = self.scene.current_rect
-        x = int(rect.x())
-        y = int(rect.y())
-        w = int(rect.width())
-        h = int(rect.height())
+        x = round(rect.x())
+        y = round(rect.y())
+        w = round(rect.width())
+        h = round(rect.height())
         crop_rect = (x, y, w, h)
 
         override_name = self.main_window.override_name_input.text()
