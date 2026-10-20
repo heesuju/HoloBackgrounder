@@ -400,6 +400,20 @@ class CropTab(QWidget):
         self.ratio_combo.currentIndexChanged.connect(self.on_ratio_changed)
         form.addRow("Ratio:", self.ratio_combo)
 
+        self.x_spin = QSpinBox()
+        self.y_spin = QSpinBox()
+        for spin in (self.x_spin, self.y_spin):
+            spin.setRange(0, 32767)
+            spin.setSuffix(" px")
+            spin.setKeyboardTracking(False)
+            spin.valueChanged.connect(self.on_offset_changed)
+        offset_layout = QHBoxLayout()
+        offset_layout.addWidget(QLabel("X"))
+        offset_layout.addWidget(self.x_spin)
+        offset_layout.addWidget(QLabel("Y"))
+        offset_layout.addWidget(self.y_spin)
+        form.addRow("Offset:", offset_layout)
+
         self.width_spin = QSpinBox()
         self.height_spin = QSpinBox()
         for spin, dim in ((self.width_spin, "width"), (self.height_spin, "height")):
@@ -482,17 +496,18 @@ class CropTab(QWidget):
             return size[0] / size[1] if size else None
         return value[0] / value[1]
 
-    def clamped_rect(self, cx, cy, w, h):
-        """Whole-pixel rect of size w x h centered near (cx, cy), kept inside the image."""
+    def clamped_rect(self, cx, cy, w, h, top_left=None):
+        """Whole-pixel rect of size w x h centered near (cx, cy) (or at top_left), kept inside the image."""
         img_w, img_h = self.image_size()
         w = min(max(1, int(round(w))), img_w)
         h = min(max(1, int(round(h))), img_h)
-        x = max(0, min(round(cx - w / 2), img_w - w))
-        y = max(0, min(round(cy - h / 2), img_h - h))
+        x, y = top_left if top_left else (cx - w / 2, cy - h / 2)
+        x = max(0, min(round(x), img_w - w))
+        y = max(0, min(round(y), img_h - h))
         return QRectF(x, y, w, h)
 
-    def set_crop_rect(self, cx, cy, w, h, drive="width"):
-        """Place a w x h crop rect around (cx, cy); when locked, the non-driving side follows the ratio."""
+    def set_crop_rect(self, cx, cy, w, h, drive="width", top_left=None):
+        """Place a w x h crop rect around (cx, cy) or at top_left; when locked, the non-driving side follows the ratio."""
         ratio = self.locked_ratio()
         if ratio:
             img_w, img_h = self.image_size()
@@ -503,7 +518,7 @@ class CropTab(QWidget):
             elif round(h) * ratio <= img_w:
                 h = max(1, round(h))
                 w = h * ratio
-        self.scene.rect_item.setRect(self.clamped_rect(cx, cy, w, h))
+        self.scene.rect_item.setRect(self.clamped_rect(cx, cy, w, h, top_left))
         self.scene.rect_item.show()
         self.scene.update_current_rect()
 
@@ -511,9 +526,10 @@ class CropTab(QWidget):
         rect = self.scene.rect_item.rect() if self.scene.rect_item.isVisible() else None
         if rect is None or rect.width() < 1 or rect.height() < 1:
             return
-        for spin, value in ((self.width_spin, rect.width()), (self.height_spin, rect.height())):
+        for spin, value in ((self.x_spin, rect.x()), (self.y_spin, rect.y()),
+                            (self.width_spin, max(1, rect.width())), (self.height_spin, max(1, rect.height()))):
             spin.blockSignals(True)
-            spin.setValue(max(1, round(value)))
+            spin.setValue(round(value))
             spin.blockSignals(False)
 
     def on_ratio_changed(self, _index):
@@ -574,10 +590,26 @@ class CropTab(QWidget):
                 w = 0
         rect = self.current_crop_rect()
         if rect is not None:
-            cx, cy = rect.center().x(), rect.center().y()
+            # Keep the top-left corner (the X/Y offset) fixed while resizing
+            self.set_crop_rect(0, 0, w, h, drive=dim, top_left=(rect.x(), rect.y()))
         else:
-            cx, cy = size[0] / 2, size[1] / 2
-        self.set_crop_rect(cx, cy, w, h, drive=dim)
+            self.set_crop_rect(size[0] / 2, size[1] / 2, w, h, drive=dim)
+
+    def on_offset_changed(self, _value):
+        size = self.image_size()
+        if not size:
+            return
+        x, y = self.x_spin.value(), self.y_spin.value()
+        rect = self.current_crop_rect()
+        if rect is not None:
+            w, h = rect.width(), rect.height()
+        else:
+            # No selection yet: take the remaining area from the offset to the image edge
+            w, h = size[0] - x, size[1] - y
+            ratio = self.locked_ratio()
+            if ratio:
+                w, h = fit_ratio(w, 0, ratio, w, h)
+        self.set_crop_rect(0, 0, w, h, top_left=(x, y))
 
     def create_checkerboard_pattern(self):
         size = 20
@@ -634,7 +666,8 @@ class CropTab(QWidget):
                 
                 self.scene.setSceneRect(0, 0, w, h)
                 self.pixmap_item.setPixmap(QPixmap.fromImage(self.original_img))
-                for spin, limit in ((self.width_spin, w), (self.height_spin, h)):
+                for spin, limit in ((self.width_spin, w), (self.height_spin, h),
+                                    (self.x_spin, w - 1), (self.y_spin, h - 1)):
                     spin.blockSignals(True)
                     spin.setMaximum(limit)
                     spin.blockSignals(False)
