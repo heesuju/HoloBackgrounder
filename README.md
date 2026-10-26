@@ -4,7 +4,8 @@ A PyQt6-based desktop application that converts GIF and WEBM files into MP4 form
 
 ## Features
 
-- **Drag and Drop Interface**: Easily import your `.gif` or `.webm` files.
+- **Drag and Drop Interface**: Easily import your media files (videos, GIFs, and images).
+- **Extract Frames**: Extract all different/unique frames from videos (`.mp4`, `.webm`, `.avi`, `.mov`, `.mkv`, etc.) or animated `.gif` files into images with intelligent duplicate frame filtering (consecutive or global deduplication, customizable difference threshold, timeline scrubber, and filmstrip preview).
 - **Background Replacement**: Replace transparent or solid backgrounds with a specific hex color (e.g., `#ffffff`) by adjusting the color matching threshold.
 - **Looping**: Extend the duration of the MP4 by looping the input video a specific number of times.
 - **Frame Padding**: Duplicate the last frame to prevent playback skipping on some hardware players.

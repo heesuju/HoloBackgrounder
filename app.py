@@ -17,9 +17,11 @@ from tabs.pixel_tab import PixelTab
 from tabs.icon_tab import IconTab
 from tabs.resize_tab import ResizeTab
 from tabs.region_tab import RegionTab
+from tabs.frame_extract_tab import FrameExtractTab
 
 IMAGES = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
 IMAGES_TIFF = IMAGES + ('.tif', '.tiff')
+VIDEOS = ('.mp4', '.gif', '.webm', '.avi', '.mov', '.mkv', '.m4v', '.wmv')
 
 # Sidebar layout: (group, [(label, tab class, accepted extensions or None for any file)])
 # Extensions mirror what each tab picks out of the global file list; tools that can't
@@ -27,6 +29,7 @@ IMAGES_TIFF = IMAGES + ('.tif', '.tiff')
 TOOL_GROUPS = [
     ("Convert", [
         ("GIF to MP4", GifTab, ('.gif', '.webm')),
+        ("Extract Frames", FrameExtractTab, VIDEOS),
         ("Images to PDF", PdfTab, IMAGES_TIFF + ('.gif',)),
     ]),
     ("Resize & Crop", [

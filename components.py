@@ -232,6 +232,19 @@ class MultiDragDropLabel(QLabel):
                 cache[path] = self.thumb_cache[path]
                 continue
             img = QImage(path)
+            if img.isNull() and path.lower().endswith(('.mp4', '.webm', '.avi', '.mov', '.mkv', '.m4v', '.wmv')):
+                try:
+                    import cv2
+                    cap = cv2.VideoCapture(path)
+                    if cap.isOpened():
+                        ret, frame = cap.read()
+                        if ret and frame is not None:
+                            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            h, w, ch = rgb.shape
+                            img = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888).copy()
+                        cap.release()
+                except Exception:
+                    pass
             cache[path] = None if img.isNull() else QPixmap.fromImage(img.scaled(
                 thumb_px, thumb_px, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation))

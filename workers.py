@@ -245,3 +245,118 @@ class PixelWorkerThread(QThread):
         except Exception as e:
             self.finished.emit(False, str(e))
 
+class FrameExtractWorkerThread(QThread):
+    finished = pyqtSignal(bool, str)
+    progress = pyqtSignal(str)
+    item_progress = pyqtSignal(int, int, int) # current_frame, total_frames, saved_count
+
+    def __init__(self, file_paths, output_dir, mode='consecutive', threshold=1.0,
+                 step=1, output_format='png', jpeg_quality=95, base_name=None,
+                 start_index=1, zero_pad=-1, create_subfolder=True):
+        super().__init__()
+        import threading
+        self.file_paths = file_paths
+        self.output_dir = output_dir
+        self.mode = mode
+        self.threshold = threshold
+        self.step = step
+        self.output_format = output_format
+        self.jpeg_quality = jpeg_quality
+        self.base_name = base_name
+        self.start_index = start_index
+        self.zero_pad = zero_pad
+        self.create_subfolder = create_subfolder
+        self.cancel_event = threading.Event()
+
+    def cancel(self):
+        self.cancel_event.set()
+
+    def run(self):
+        try:
+            import frame_extractor
+            total_files = len(self.file_paths)
+            total_extracted = 0
+            saved_directories = []
+
+            for f_idx, file_path in enumerate(self.file_paths):
+                if self.cancel_event.is_set():
+                    self.finished.emit(False, "Extraction cancelled by user.")
+                    return
+
+                fname = os.path.basename(file_path)
+                self.progress.emit(f"Extracting ({f_idx + 1}/{total_files}): {fname}...")
+
+                # If multiple files and user provided an override base_name, suffix with file index
+                curr_base_name = self.base_name
+                if self.base_name and total_files > 1:
+                    curr_base_name = f"{self.base_name}_{f_idx + 1}"
+
+                def on_progress(curr, total, saved, _path):
+                    self.item_progress.emit(curr, total, saved)
+                    self.progress.emit(f"[{fname}] Frame {curr}/{total} - Saved {saved} unique frames")
+
+                result = frame_extractor.extract_different_frames_to_disk(
+                    file_path=file_path,
+                    output_dir=self.output_dir,
+                    mode=self.mode,
+                    threshold=self.threshold,
+                    step=self.step,
+                    output_format=self.output_format,
+                    jpeg_quality=self.jpeg_quality,
+                    base_name=curr_base_name,
+                    start_index=self.start_index,
+                    zero_pad=self.zero_pad,
+                    create_subfolder=self.create_subfolder,
+                    progress_callback=on_progress,
+                    cancel_event=self.cancel_event
+                )
+
+                total_extracted += result['total_extracted']
+                if result['output_dir'] not in saved_directories:
+                    saved_directories.append(result['output_dir'])
+
+            msg = f"Successfully extracted {total_extracted} frames from {total_files} file(s) into:\n" + "\n".join(saved_directories[:3])
+            if len(saved_directories) > 3:
+                msg += f"\n... and {len(saved_directories) - 3} more folders"
+            self.finished.emit(True, msg)
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
+class FrameScanWorkerThread(QThread):
+    scan_finished = pyqtSignal(list, str) # list of items, file_path
+    scan_progress = pyqtSignal(int, int)  # current, total
+
+    def __init__(self, file_path, mode='consecutive', threshold=1.0, step=1):
+        super().__init__()
+        import threading
+        self.file_path = file_path
+        self.mode = mode
+        self.threshold = threshold
+        self.step = step
+        self.cancel_event = threading.Event()
+
+    def cancel(self):
+        self.cancel_event.set()
+
+    def run(self):
+        try:
+            import frame_extractor
+            def on_progress(curr, total, kept):
+                self.scan_progress.emit(curr, total)
+
+            items = frame_extractor.scan_different_frames(
+                file_path=self.file_path,
+                mode=self.mode,
+                threshold=self.threshold,
+                step=self.step,
+                progress_callback=on_progress,
+                cancel_event=self.cancel_event
+            )
+            if not self.cancel_event.is_set():
+                self.scan_finished.emit(items, self.file_path)
+        except Exception as e:
+            print(f"Error scanning frames: {e}")
+            if not self.cancel_event.is_set():
+                self.scan_finished.emit([], self.file_path)
+
+
